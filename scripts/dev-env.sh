@@ -9,6 +9,6 @@ export TEST_DATABASE_URL=jdbc:postgresql://localhost:54398/smohua_test
 # メールの通知（skereru の開発環境の Mailpit。http://localhost:8032 で中身を見られる。skereru 本体に送るなら submission の 2587 番とアプリパスワード）
 export SMTP_HOST=localhost SMTP_PORT=1032 SMTP_TLS=none MAIL_FROM=smohua@example.com
 # smohua を使う兄弟のサービス（skiwi のページに回答を表示する。開発用の値。本番では secret をランダムな値にする）
-export OAUTH_CLIENTS='[{"id":"skiwi","secret":"skiwi-dev-secret-0123456789","redirectUri":"http://localhost:8080/api/integrations/smohua/callback","name":"skiwi","scopes":["read"]}]'
+export OAUTH_CLIENTS='[{"id":"skiwi","secret":"skiwi-dev-secret-0123456789","redirectUri":"http://localhost:5173/api/integrations/smohua/callback","name":"skiwi","scopes":["read"]}]'
 # smohua から stui へ通知する向き（stui の OAUTH_CLIENTS に client_id=smohua として登録する。URL は stui の画面の開発サーバー）
 export STUI_URL=http://localhost:5178 STUI_INTERNAL_URL=http://localhost:8098 STUI_CLIENT_ID=smohua STUI_CLIENT_SECRET=smohua-dev-secret-0123456789
