@@ -1,6 +1,7 @@
 package smohua.api
 
 import cats.effect.*
+import cats.syntax.all.*
 import io.circe.Json
 import io.circe.syntax.*
 import org.http4s.*
@@ -23,8 +24,8 @@ final class AuthRoutes(oidc: Option[OidcClient], users: UserStore, activity: Act
   private val LoginCookie = "smohua_login_state"
 
   /** ログインした: セッションを発行する。 */
-  private def loggedIn(u: User, via: String): IO[ResponseCookie] =
-    sessions.issue(u).flatTap(_ => activity.audit(Some(u.id), via, "auth.login", None, Json.obj()) *> smohua.observe.Metrics.count("smohua.logins", "via" -> via))
+  private def loggedIn(u: User, via: String, idToken: Option[String] = None): IO[ResponseCookie] =
+    sessions.issue(u, idToken).flatTap(_ => activity.audit(Some(u.id), via, "auth.login", None, Json.obj()) *> smohua.observe.Metrics.count("smohua.logins", "via" -> via))
 
   val routes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case req @ GET -> Root / "auth" / "login" =>
@@ -57,15 +58,20 @@ final class AuthRoutes(oidc: Option[OidcClient], users: UserStore, activity: Act
                     // アイコンは IdP（sruru）の picture をそのまま写す（外されていれば外す）
                     u <- users.upsert(id.sub, id.name, id.email, id.picture, cfg.timezone)
                     r <- if u.disabled then err(Status.Forbidden, "このユーザーは無効にされています")
-                         else users.syncGroups(u.id, id.groups) *> loggedIn(u, "web").flatMap(c => redirect(back, Some(c)))
+                         else users.syncGroups(u.id, id.groups) *> loggedIn(u, "web", id.idToken).flatMap(c => redirect(back, Some(c)))
                   yield r
               }
           }
         case (None, _, _) => err(Status.ServiceUnavailable, "OIDC が設定されていません")
         case _            => err(Status.BadRequest, "code と state が必要です")
 
+    // ログアウト: セッションを消し、IdP にもログアウトを頼む（IdP のログインが残っていると、すぐにログインし直してしまうため）
     case req @ POST -> Root / "auth" / "logout" =>
-      sessions.revoke(req).flatMap(c => Ok(Json.obj("redirect" -> "/".asJson)).map(_.addCookie(c)))
+      sessions.revoke(req).flatMap { (idToken, c) =>
+        oidc.flatTraverse(_.logoutUri(idToken, s"${cfg.publicUrl.stripSuffix("/")}/")).flatMap { idp =>
+          Ok(Json.obj("redirect" -> idp.fold("/")(_.renderString).asJson)).map(_.addCookie(c))
+        }
+      }
 
     // 開発用: 名前だけでログインする（DEV_LOGIN=true のときだけ）
     case req @ POST -> Root / "auth" / "dev-login" if cfg.devLogin =>

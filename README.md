@@ -85,7 +85,7 @@ STATIC_DIR=dist/static java -cp 'dist/lib/*' smohua.app.Main
 | `HTTP_PORT` | 待ち受けるポート（既定 8080） |
 | `STATIC_DIR` | ビルドした画面（`dist/static`）。指定すると画面も配信する |
 | `APP_SECRET` | 16文字以上の秘密の値（必須。連携のトークンの暗号化に使う。**全ノードで同じ値**） |
-| `OIDC_ISSUER`・`OIDC_CLIENT_ID`・`OIDC_CLIENT_SECRET` | OIDC の IdP（sruru）。リダイレクト URI は `${PUBLIC_URL}/auth/callback`。`OIDC_GROUPS_CLAIM`（既定 `groups`） |
+| `OIDC_ISSUER`・`OIDC_CLIENT_ID`・`OIDC_CLIENT_SECRET` | OIDC の IdP（sruru）。リダイレクト URI は `${PUBLIC_URL}/auth/callback`。ログアウトでは IdP からもログアウトし、`${PUBLIC_URL}/` に戻る（sruru 以外の IdP では、この戻り先も登録する）。`OIDC_GROUPS_CLAIM`（既定 `groups`） |
 | `ADMIN_GROUPS` | 管理者にする IdP のグループ（カンマ区切り） |
 | `TIMEZONE` | 新しいユーザーの既定のタイムゾーン（既定 `Asia/Tokyo`。CSV の日時に使う） |
 | `SMTP_HOST`・`SMTP_PORT`・`SMTP_TLS`（`starttls`・`ssl`・`none`）・`SMTP_USER`・`SMTP_PASSWORD`・`MAIL_FROM` | メールの通知。skereru に送るなら、skereru に送信用のメールボックスを作り、submission（587番）とそのアプリパスワードを指定する |

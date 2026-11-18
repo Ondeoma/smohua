@@ -42,7 +42,7 @@ def mounted(s: State): Unit = {
   }
 }
 
-def logout(): Unit = Api.logout().foreach(_ => dom.window.location.href = "/")
+def logout(): Unit = Api.logout().onComplete(r => dom.window.location.href = r.getOrElse("/"))
 
 def userName = Store.me.mapC(_.map(_.name).getOrElse(""))
 def meBrief = Store.me.mapC(_.map(m => UserBrief(m.id, m.name, m.avatarUrl)))
