@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="smohua">
+  <!-- 回答の用紙を抱えたモフア（mōhua. ニュージーランドの鳥. 黄色い頭が目印）. 台紙・芽・丸い頭・目は兄弟（skea・skawau・skuaka・skaka・stui）と同じ形 -->
+  <rect width="160" height="160" rx="36" fill="#FFF4D6"/>
+  <path d="M80 31q-12-13-4-27q14 7 4 27z" fill="#2E7D6B"/><path d="M80 31q13-10 21-4q-8 12-21 4z" fill="#3FA68C"/>
+  <circle cx="80" cy="80" r="50" fill="#F2B824"/>
+  <path d="M36 66q6-34 44-36q38 2 44 36q-18-16-44-16q-26 0-44 16z" fill="#FFD95A" opacity=".9"/>
+  <path d="M34 100q46 26 92 0q-6 22-28 28h-36q-22-6-28-28z" fill="#8A7A3A" opacity=".55"/>
+  <circle cx="66" cy="62" r="5" fill="#13202E"/><circle cx="67.5" cy="60.5" r="1.6" fill="#fff"/><circle cx="94" cy="62" r="5" fill="#13202E"/><circle cx="95.5" cy="60.5" r="1.6" fill="#fff"/>
+  <ellipse cx="55" cy="75" rx="7" ry="4" fill="#F4A3A3"/><ellipse cx="105" cy="75" rx="7" ry="4" fill="#F4A3A3"/>
+  <path d="M73 68h14l-7 11z" fill="#2A2F38"/>
+  <rect x="44" y="92" width="72" height="56" rx="8" fill="#fff" stroke="#D9CBB0" stroke-width="1.5"/>
+  <rect x="66" y="87" width="28" height="11" rx="5" fill="#0F766E"/>
+  <g fill="none" stroke="#0F766E" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M53 109l4 4l7-8"/><path d="M53 126l4 4l7-8"/></g>
+  <g stroke="#B9C7C5" stroke-width="4" stroke-linecap="round"><path d="M72 110h34M72 127h24"/></g>
+  <ellipse cx="42" cy="112" rx="8" ry="6" fill="#F2B824"/><ellipse cx="118" cy="112" rx="8" ry="6" fill="#F2B824"/>
+</svg>
