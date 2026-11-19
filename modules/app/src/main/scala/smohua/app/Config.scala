@@ -9,21 +9,11 @@ import sbirds.mail.SmtpConfig
 
 /** 設定は環境変数から読む。 */
 object Config {
-  private def opt(
-    name: String
-  ): Option[String] = sys.env.get(name).map(_.trim).filter(_.nonEmpty)
-  private def int(
-    name: String
-  ): Option[Int] = opt(name).flatMap(_.toIntOption)
-  private def enabled(
-    name: String
-  ): Boolean = opt(name).exists(_.equalsIgnoreCase("true"))
-  private def required(
-    name: String
-  ): Either[String, String] = opt(name).toRight(s"環境変数 $name を設定してください")
-  private def list(
-    name: String
-  ): List[String] = opt(name).toList.flatMap(_.split(',').map(_.trim).filter(_.nonEmpty))
+  private def opt(name: String): Option[String] = sys.env.get(name).map(_.trim).filter(_.nonEmpty)
+  private def int(name: String): Option[Int] = opt(name).flatMap(_.toIntOption)
+  private def enabled(name: String): Boolean = opt(name).exists(_.equalsIgnoreCase("true"))
+  private def required(name: String): Either[String, String] = opt(name).toRight(s"環境変数 $name を設定してください")
+  private def list(name: String): List[String] = opt(name).toList.flatMap(_.split(',').map(_.trim).filter(_.nonEmpty))
 
   /** OAUTH_CLIENTS: [{"id":"skiwi","secret":"…","redirectUri":"https://…/api/integrations/smohua/callback","name":"skiwi","scopes":["read"]}] */
   private def oauthClients: Either[String, List[smohua.api.OAuthClient]] =
@@ -33,32 +23,22 @@ object Config {
       ).flatMap(_.traverse { j =>
         val c = j.hcursor
         (c.get[String]("id"), c.get[String]("secret"), c.get[String]("redirectUri")).tupled.toOption
-          .filter(
-            (
-              id,
-              sec,
-              uri
-            ) =>
-              id.nonEmpty && sec.length >= 16 &&
-                (uri.startsWith("https://") ||
-                  "^http://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?/".r.findFirstIn(uri).isDefined)
+          .filter((id, sec, uri) =>
+            id.nonEmpty && sec.length >= 16 &&
+              (uri.startsWith("https://") ||
+                "^http://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?/".r.findFirstIn(uri).isDefined)
           )
-          .map(
-            (
+          .map((id, sec, uri) =>
+            smohua.api.OAuthClient(
               id,
               sec,
-              uri
-            ) =>
-              smohua.api.OAuthClient(
-                id,
-                sec,
-                uri,
-                c.get[String]("name").getOrElse(id),
-                c.get[List[String]]("scopes").toOption.map(_.filter(Set(
-                  "read",
-                  "write"
-                ))).filter(_.nonEmpty).getOrElse(List("read"))
-              )
+              uri,
+              c.get[String]("name").getOrElse(id),
+              c.get[List[String]]("scopes").toOption.map(_.filter(Set(
+                "read",
+                "write"
+              ))).filter(_.nonEmpty).getOrElse(List("read"))
+            )
           )
           .toRight("OAUTH_CLIENTS の各要素には id・secret（16文字以上）・redirectUri（https://。開発中は http://localhost:…/ も可）を指定してください")
       })
@@ -114,19 +94,14 @@ object Config {
           timezone = tz,
           oauthClients = clients,
           // STUI_URL・STUI_CLIENT_ID・STUI_CLIENT_SECRET（STUI_INTERNAL_URL はサーバーから呼ぶ URL）。stui に smohua をクライアントとして登録しておく
-          stui = (opt("STUI_URL"), opt("STUI_CLIENT_ID"), opt("STUI_CLIENT_SECRET")).mapN(
-            (
-              u,
+          stui = (opt("STUI_URL"), opt("STUI_CLIENT_ID"), opt("STUI_CLIENT_SECRET")).mapN((u, id, sec) =>
+            smohua.api.LinkService(
+              "stui",
+              u.stripSuffix("/"),
               id,
-              sec
-            ) =>
-              smohua.api.LinkService(
-                "stui",
-                u.stripSuffix("/"),
-                id,
-                sec,
-                opt("STUI_INTERNAL_URL").map(_.stripSuffix("/"))
-              )
+              sec,
+              opt("STUI_INTERNAL_URL").map(_.stripSuffix("/"))
+            )
           ),
           mail = opt("SMTP_HOST").isDefined,
           // ログインしなくても使える入口の、IP ごとの1分あたりの回数（0 なら制限しない）

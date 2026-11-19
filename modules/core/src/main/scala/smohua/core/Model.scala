@@ -3,9 +3,7 @@ package smohua.core
 import java.util.UUID
 
 /** UUID として読めれば Some（読めなければ None）。 */
-def uuidOpt(
-  s: String
-): Option[UUID] = scala.util.Try(UUID.fromString(s.trim)).toOption
+def uuidOpt(s: String): Option[UUID] = scala.util.Try(UUID.fromString(s.trim)).toOption
 
 /** APIキーのスコープ。 */
 enum Scope {
@@ -13,17 +11,13 @@ enum Scope {
 }
 
 object Scope {
-  def parse(
-    s: String
-  ): Option[Scope] = s.trim.toLowerCase match {
+  def parse(s: String): Option[Scope] = s.trim.toLowerCase match {
     case "read" => Some(Read)
     case "write" => Some(Write)
     case "admin" => Some(Admin)
     case _ => None
   }
-  extension (
-    s: Scope
-  ) {
+  extension (s: Scope) {
     def asString: String = s match {
       case Read => "read"
       case Write => "write"
@@ -32,18 +26,15 @@ object Scope {
   }
 }
 
-final case class User(
-  id: UUID,
-  sub: String,
-  name: String,
-  email: Option[String],
-  avatarUrl: Option[String],
-  isAdmin: Boolean,
-  disabled: Boolean,
-  timezone: String)
-final case class Group(
-  id: UUID,
-  name: String)
+final case class User(id: UUID,
+                      sub: String,
+                      name: String,
+                      email: Option[String],
+                      avatarUrl: Option[String],
+                      isAdmin: Boolean,
+                      disabled: Boolean,
+                      timezone: String)
+final case class Group(id: UUID, name: String)
 
 /** 認証手段。 */
 enum AuthVia {
@@ -62,11 +53,7 @@ enum AuthVia {
 }
 
 /** 認証済みの利用者。isAdmin はシステム管理者（ADMIN_GROUPS の所属、または画面で管理者にしたユーザー）。 */
-final case class AuthSession(
-  user: User,
-  groups: List[Group],
-  isAdmin: Boolean,
-  via: AuthVia = AuthVia.Session) {
+final case class AuthSession(user: User, groups: List[Group], isAdmin: Boolean, via: AuthVia = AuthVia.Session) {
 
   /** 更新系の操作ができるか（read スコープだけのキーは不可）。 */
   def canWrite: Boolean = via match {

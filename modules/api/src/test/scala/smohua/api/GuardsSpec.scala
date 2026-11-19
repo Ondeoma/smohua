@@ -18,10 +18,7 @@ class GuardsSpec extends CatsEffectSuite {
   private val cfg = ApiConfig(Set.empty, cookieSecure = true, "https://smohua.example.com")
   private val ok = HttpRoutes.of[IO] { case _ => Ok("ok") }
 
-  private def header(
-    r: Response[IO],
-    k: String
-  ): Option[String] = r.headers.get(CIString(k)).map(_.head.value)
+  private def header(r: Response[IO], k: String): Option[String] = r.headers.get(CIString(k)).map(_.head.value)
 
   test("ヘッダー: ふつうの画面は iframe を禁じ、回答の画面（/f/…）だけ埋め込める") {
     val app = Guards(ok, cfg).orNotFound
@@ -41,9 +38,8 @@ class GuardsSpec extends CatsEffectSuite {
 
   test("CSRF: Cookie のセッションで、別のサイトからの更新の要求は断る") {
     val app = Guards(ok, cfg).orNotFound
-    def post(
-      origin: String
-    ) = Request[IO](Method.POST, uri"/api/forms").addCookie(cfg.cookieName, "x").putHeaders("Origin" -> origin)
+    def post(origin: String) =
+      Request[IO](Method.POST, uri"/api/forms").addCookie(cfg.cookieName, "x").putHeaders("Origin" -> origin)
     for {
       evil <- app.run(post("https://evil.example"))
       same <- app.run(post("https://smohua.example.com"))
@@ -55,12 +51,7 @@ class GuardsSpec extends CatsEffectSuite {
     }
   }
 
-  private def from(
-    ip: String,
-    method: Method,
-    path: Uri,
-    xff: Option[String] = None
-  ): Request[IO] = {
+  private def from(ip: String, method: Method, path: Uri, xff: Option[String] = None): Request[IO] = {
     val r = Request[IO](method, path).withAttribute(
       Request.Keys.ConnectionInfo,
       Request.Connection(
@@ -95,10 +86,7 @@ class GuardsSpec extends CatsEffectSuite {
 
   test("回数の制限: X-Forwarded-For は、信じるプロキシから来たときだけ使う") {
     val proxy = RateLimit.proxy("10.0.0.0/8").toList
-    val req = (
-      ip: String,
-      xff: String
-    ) => from(ip, Method.GET, uri"/auth/login", Some(xff))
+    val req = (ip: String, xff: String) => from(ip, Method.GET, uri"/auth/login", Some(xff))
     // プロキシ経由なら、その左の IP（本当の相手）で数える
     assertEquals(RateLimit.clientKey(req("10.1.1.1", "198.51.100.9, 10.2.2.2"), proxy), Some("198.51.100.9"))
     // 直接つないできた相手が勝手に書いた X-Forwarded-For は使わない

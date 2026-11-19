@@ -5,10 +5,7 @@ package smohua.core
  * 1xxx: 認証・APIキー・共通（要求の形・回数の制限）, 2xxx: フォームの作成・編集, 3xxx: 回答（回答する側・回答の管理）,
  * 4xxx: 外部との連携（stui・プッシュ通知）, 5xxx: ユーザー・通知の管理, 9xxx: サーバー内部・バックグラウンドの処理.
  */
-enum ErrorCode(
-  val code: String,
-  val status: Int,
-  val message: String) extends sbirds.shared.ErrorCode {
+enum ErrorCode(val code: String, val status: Int, val message: String) extends sbirds.shared.ErrorCode {
   case ApiKeyReadOnly extends ErrorCode("SMOHUA-1001", 403, "このAPIキーは参照専用です")
   case OidcNotConfigured extends ErrorCode("SMOHUA-1002", 503, "OIDC が設定されていません")
   case LoginExpired extends ErrorCode("SMOHUA-1003", 400, "ログインの有効期限が切れました。もう一度ログインしてください")

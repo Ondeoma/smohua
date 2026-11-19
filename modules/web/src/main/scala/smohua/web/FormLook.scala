@@ -12,13 +12,8 @@ object FormLook {
   def embedded: Boolean = new dom.URLSearchParams(dom.window.location.search).has("embed")
 
   /** 色の設定を CSS の変数に置き換えた CSS（設定した色だけ. 文字色から、薄い文字・線の色も作る）. */
-  def css(
-    a: FormAppearanceDto
-  ): String = {
-    def mix(
-      c: String,
-      p: Int
-    ) = s"color-mix(in srgb, $c $p%, transparent)"
+  def css(a: FormAppearanceDto): String = {
+    def mix(c: String, p: Int) = s"color-mix(in srgb, $c $p%, transparent)"
     val vars = List(
       // 入力欄・ラジオボタンなどのブラウザの部品も、背景の明るさに合わせる
       Option(a.background).filter(_.nonEmpty).map(c =>
@@ -35,9 +30,7 @@ object FormLook {
   }
 
   /** #rgb・#rrggbb の色が明るいか（相対輝度で見る）. */
-  def light(
-    hex: String
-  ): Boolean = {
+  def light(hex: String): Boolean = {
     val h = hex.stripPrefix("#")
     val full = if (h.length == 3) h.flatMap(c => s"$c$c") else h
     scala.util.Try {
@@ -46,9 +39,7 @@ object FormLook {
     }.getOrElse(true)
   }
 
-  def apply(
-    a: FormAppearanceDto
-  ): Unit = {
+  def apply(a: FormAppearanceDto): Unit = {
     val el = Option(dom.document.getElementById(Id)).getOrElse {
       val e = dom.document.createElement("style"); e.id = Id; dom.document.head.appendChild(e); e
     }

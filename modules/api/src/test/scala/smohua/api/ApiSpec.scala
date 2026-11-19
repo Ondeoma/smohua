@@ -31,25 +31,18 @@ class ApiSpec extends DbSuite {
     stui = Some(LinkService("stui", "https://stui.example.com", "smohua", "secret-secret-secret"))
   )
 
-  private final case class Env(
-    app: HttpApp[IO],
-    users: UserStore,
-    forms: FormStore,
-    tokens: IntegrationTokenStore,
-    box: SecretBox,
-    notifier: NotifyService,
-    stuiCalls: Ref[IO, List[(String, Json)]],
-    mails: Ref[IO, List[Mail]])
+  private final case class Env(app: HttpApp[IO],
+                               users: UserStore,
+                               forms: FormStore,
+                               tokens: IntegrationTokenStore,
+                               box: SecretBox,
+                               notifier: NotifyService,
+                               stuiCalls: Ref[IO, List[(String, Json)]],
+                               mails: Ref[IO, List[Mail]])
 
-  private def env(
-    xa: doobie.Transactor[IO]
-  ): IO[Env] =
+  private def env(xa: doobie.Transactor[IO]): IO[Env] =
     (Ref.of[IO, List[(String, Json)]](Nil), Ref.of[IO, List[Mail]](Nil), EventFeed(new FormStore(xa))).mapN {
-      (
-        calls,
-        mails,
-        feed
-      ) =>
+      (calls, mails, feed) =>
         val users = new UserStore(xa); val forms = new FormStore(xa); val activity = new ActivityStore(xa);
         val tokens = new IntegrationTokenStore(xa)
         val box = SecretBox("test-secret-0123456789")
@@ -63,9 +56,7 @@ class ApiSpec extends DbSuite {
             else req.as[Json].flatMap(j => calls.update(_ :+ (token -> j))) *> Created(Json.obj())
         }.orNotFound)
         val mailer = new Mailer {
-          def send(
-            m: Mail
-          ): IO[Unit] = mails.update(_ :+ m)
+          def send(m: Mail): IO[Unit] = mails.update(_ :+ m)
         }
         val sess = new SessionAuth(users, cfg)
         val notifier = new NotifyService(forms, users, tokens, box, stui, Some(mailer), None, cfg)
@@ -84,22 +75,16 @@ class ApiSpec extends DbSuite {
         )
     }
 
-  private def key(
-    e: Env,
-    u: User,
-    scopes: List[String] = List("read", "write")
-  ): IO[String] = {
+  private def key(e: Env, u: User, scopes: List[String] = List("read", "write")): IO[String] = {
     val (k, prefix) = ApiKeys.generate()
     e.users.createKey(u.id, "test", prefix, Crypto.sha256(k), scopes, None).as(k)
   }
 
-  private def call(
-    e: Env,
-    method: Method,
-    path: String,
-    key: Option[String],
-    body: Option[Json] = None
-  ): IO[(Status, Json)] = {
+  private def call(e: Env,
+                   method: Method,
+                   path: String,
+                   key: Option[String],
+                   body: Option[Json] = None): IO[(Status, Json)] = {
     val r0 = Request[IO](method, Uri.unsafeFromString(path))
     val r1 = key.fold(r0)(k => r0.putHeaders(Authorization(Credentials.Token(AuthScheme.Bearer, k))))
     e.app.run(body.fold(r1)(r1.withEntity(_))).flatMap(r =>
@@ -117,14 +102,10 @@ class ApiSpec extends DbSuite {
     )
   )
 
-  private def id(
-    j: Json
-  ): String = j.hcursor.get[String]("id").getOrElse(fail(s"id がありません: ${j.noSpaces}"))
+  private def id(j: Json): String = j.hcursor.get[String]("id").getOrElse(fail(s"id がありません: ${j.noSpaces}"))
 
   /** 送信待ちを処理する（自分のテストの分が送られるまで何度か）。 */
-  private def drain(
-    e: Env
-  ): IO[Unit] = e.forms.processOutbox(1000)(_ => IO.pure(OutboxResult.Skip("前のテストの残り"))).void
+  private def drain(e: Env): IO[Unit] = e.forms.processOutbox(1000)(_ => IO.pure(OutboxResult.Skip("前のテストの残り"))).void
 
   withDb("フォームを作る → 公開する → 回答する → 一覧・集計・CSV で見る") { xa =>
     for {
@@ -335,13 +316,9 @@ class ApiSpec extends DbSuite {
       _ <-
       (IO.sleep(scala.concurrent.duration.DurationInt(500).millis) *>
         (e.mails.get, e.stuiCalls.get, e.tokens.token(editor.id, "stui")).tupled)
-        .iterateUntil(
-          (
-            m,
-            s,
-            t
-          ) => m.size >= 2 && s.nonEmpty && t.isEmpty
-        ).timeout(scala.concurrent.duration.DurationInt(40).seconds)
+        .iterateUntil((m, s, t) => m.size >= 2 && s.nonEmpty && t.isEmpty).timeout(
+          scala.concurrent.duration.DurationInt(40).seconds
+        )
       _ <- fiber.cancel
       mails <- e.mails.get
       _ = assertEquals(mails.map(_.to).toSet, Set(owner.email.get, editor.email.get))
@@ -451,12 +428,7 @@ class ApiSpec extends DbSuite {
   }
 
   withDb("MCP: ツールの一覧・フォームの作成から回答の取得まで") { xa =>
-    def rpc(
-      e: Env,
-      k: String,
-      method: String,
-      params: Json = Json.obj()
-    ): IO[Json] =
+    def rpc(e: Env, k: String, method: String, params: Json = Json.obj()): IO[Json] =
       call(
         e,
         Method.POST,
@@ -464,12 +436,7 @@ class ApiSpec extends DbSuite {
         Some(k),
         Some(Json.obj("jsonrpc" -> "2.0".asJson, "id" -> 1.asJson, "method" -> method.asJson, "params" -> params))
       ).map(_._2)
-    def tool(
-      e: Env,
-      k: String,
-      name: String,
-      args: Json
-    ): IO[(Boolean, String)] =
+    def tool(e: Env, k: String, name: String, args: Json): IO[(Boolean, String)] =
       rpc(e, k, "tools/call", Json.obj("name" -> name.asJson, "arguments" -> args)).map { j =>
         val c = j.hcursor.downField("result")
         (

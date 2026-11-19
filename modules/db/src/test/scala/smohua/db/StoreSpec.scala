@@ -30,20 +30,12 @@ trait DbSuite extends CatsEffectSuite {
 
   override def munitFixtures = if cfg.isDefined then List(xaFixture) else Nil
 
-  protected def withDb(
-    name: String
-  )(
-    body: doobie.Transactor[IO] => IO[Unit]
-  ): Unit =
+  protected def withDb(name: String)(body: doobie.Transactor[IO] => IO[Unit]): Unit =
     test(name) {
       if cfg.isEmpty then IO(assume(false, "TEST_DATABASE_URL が未設定")) else body(xaFixture())
     }
 
-  protected def newUser(
-    users: UserStore,
-    name: String,
-    avatar: Option[String] = None
-  ): IO[User] =
+  protected def newUser(users: UserStore, name: String, avatar: Option[String] = None): IO[User] =
     users.upsert(s"test:${UUID.randomUUID()}", name, Some(s"${UUID.randomUUID()}@example.com"), avatar)
 }
 
@@ -165,9 +157,7 @@ class StoreSpec extends DbSuite {
 
   withDb("回答: 受付中だけ・1人1回・一覧・集計用の読み出し・削除") { xa =>
     val users = new UserStore(xa); val forms = new FormStore(xa)
-    def ans(
-      n: String
-    ) = Map("name" -> n.asJson, "food" -> "寿司".asJson)
+    def ans(n: String) = Map("name" -> n.asJson, "food" -> "寿司".asJson)
     for {
       a <- newUser(users, "持ち主")
       u <- newUser(users, "回答者", Some("https://idp.example/a.png"))

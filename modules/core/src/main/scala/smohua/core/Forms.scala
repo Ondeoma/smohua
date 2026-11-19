@@ -16,9 +16,7 @@ object Forms {
   private val DateRe = "^\\d{4}-\\d{2}-\\d{2}$".r
 
   /** 題名（改行などの制御文字は空白にする。メールの件名・CSV の見出し・通知の1行目にそのまま入るため）。 */
-  def title(
-    s: String
-  ): Either[String, String] = {
+  def title(s: String): Either[String, String] = {
     val t = s.map(c => if c.isControl then ' ' else c).trim
     if t.isEmpty then Left("フォームの題名を入力してください")
     else if t.length > 200 then Left("フォームの題名は200文字までにしてください")
@@ -26,9 +24,7 @@ object Forms {
   }
 
   /** 質問を整える（前後の空白・空の選択肢・重複した選択肢を除く）。だめなら理由。 */
-  def normalize(
-    qs: List[QuestionDto]
-  ): Either[String, List[QuestionDto]] =
+  def normalize(qs: List[QuestionDto]): Either[String, List[QuestionDto]] =
     if qs.size > MaxQuestions then Left(s"質問は${MaxQuestions}個までです")
     else if qs.map(_.id).distinct.size != qs.size then Left("質問の id が重複しています")
     else
@@ -36,10 +32,7 @@ object Forms {
         for rest <- acc; one <- question(q, i + 1) yield one :: rest
       }
 
-  private def question(
-    q: QuestionDto,
-    n: Int
-  ): Either[String, QuestionDto] = {
+  private def question(q: QuestionDto, n: Int): Either[String, QuestionDto] = {
     val label = q.label.trim
     val opts = q.options.map(_.trim).filter(_.nonEmpty).distinct
     if !IdRe.matches(q.id) then Left(s"質問$n: id は半角の英数字・_・- の40文字までにしてください")
@@ -64,25 +57,15 @@ object Forms {
   }
 
   /** 回答を確かめて整える（質問にない項目は捨てる。空の回答は入れない）。だめなら理由の一覧。 */
-  def validate(
-    qs: List[QuestionDto],
-    answers: Map[String, Json]
-  ): Either[List[String], Map[String, Json]] = {
+  def validate(qs: List[QuestionDto], answers: Map[String, Json]): Either[List[String], Map[String, Json]] = {
     val results = qs.map(q => answer(q, answers.get(q.id).filterNot(_.isNull)).map(_.map(q.id -> _)))
     val errors = results.collect { case Left(e) => e }
     if errors.nonEmpty then Left(errors) else Right(results.collect { case Right(Some(kv)) => kv }.toMap)
   }
 
-  private def answer(
-    q: QuestionDto,
-    v: Option[Json]
-  ): Either[String, Option[Json]] = {
-    def bad(
-      m: String
-    ) = Left(s"「${q.label}」: $m")
-    def text(
-      max: Int
-    ): Either[String, Option[Json]] =
+  private def answer(q: QuestionDto, v: Option[Json]): Either[String, Option[Json]] = {
+    def bad(m: String) = Left(s"「${q.label}」: $m")
+    def text(max: Int): Either[String, Option[Json]] =
       v.fold[Either[String, Option[Json]]](Right(None))(_.asString.map(_.trim) match {
         case None => bad("文字で入力してください")
         case Some(s) if s.length > max => bad(s"${max}文字までにしてください")
@@ -136,11 +119,9 @@ object Forms {
   }
 
   /** 質問ごとの集計。選択肢・段階は件数（0 件も並べる）、段階・数は平均、記述は新しいものから textLimit 件。answers は新しい順に渡す。 */
-  def summarize(
-    qs: List[QuestionDto],
-    answers: List[Map[String, Json]],
-    textLimit: Int = 20
-  ): List[QuestionSummaryDto] =
+  def summarize(qs: List[QuestionDto],
+                answers: List[Map[String, Json]],
+                textLimit: Int = 20): List[QuestionSummaryDto] =
     qs.map { q =>
       val vs = answers.flatMap(_.get(q.id))
       val picked: List[String] =
@@ -173,15 +154,9 @@ object Forms {
    * 見た目の設定を確かめて整える。CSS は回答の画面に足すだけなので HTML としては入らないが、外のサイトを読み込むもの
    * （@import・http(s): や // の参照）は、回答する人の IP が外に漏れるため受け付けない。
    */
-  def appearance(
-    a: FormAppearanceDto
-  ): Either[String, FormAppearanceDto] = {
-    val colors = List("背景色" -> a.background, "カードの色" -> a.card, "文字色" -> a.text, "強調色" -> a.accent).map(
-      (
-        n,
-        v
-      ) => n -> v.trim
-    )
+  def appearance(a: FormAppearanceDto): Either[String, FormAppearanceDto] = {
+    val colors =
+      List("背景色" -> a.background, "カードの色" -> a.card, "文字色" -> a.text, "強調色" -> a.accent).map((n, v) => n -> v.trim)
     val css = a.css.replace("\r\n", "\n").trim
     val lower = unescapeCss(css).toLowerCase.replaceAll("\\s+", "").replaceAll("/\\*.*?\\*/", "")
     colors.collectFirst { case (n, v) if v.nonEmpty && !ColorRe.matches(v) => s"${n}は #rgb か #rrggbb の形で入力してください" }
@@ -207,9 +182,7 @@ object Forms {
   }
 
   /** CSS のエスケープ（\\75 や \\u など）を戻す（エスケープで @import・url() の確認をすり抜けられないように）。 */
-  private[core] def unescapeCss(
-    css: String
-  ): String =
+  private[core] def unescapeCss(css: String): String =
     "\\\\(?:([0-9a-fA-F]{1,6})\\s?|(.))".r.replaceAllIn(
       css,
       m =>
@@ -219,37 +192,25 @@ object Forms {
     )
 
   /** 受付期間（始まりは終わりより前）。 */
-  def schedule(
-    s: FormScheduleDto
-  ): Either[String, FormScheduleDto] =
+  def schedule(s: FormScheduleDto): Either[String, FormScheduleDto] =
     (s.from, s.until) match {
       case (Some(f), Some(u)) if !f.isBefore(u) => Left("受付の終わりは、始まりより後にしてください")
       case _ => Right(s)
     }
 
   /** CSV の1セル。表計算ソフトで式として動かないよう、= + - @ で始まる値には ' を付ける。 */
-  def csvCell(
-    s: String
-  ): String = {
+  def csvCell(s: String): String = {
     val v = if s.nonEmpty && "=+-@\t\r".contains(s.head) then "'" + s else s
     if v.exists(c => c == ',' || c == '"' || c == '\n' || c == '\r') then "\"" + v.replace("\"", "\"\"") + "\"" else v
   }
 
-  def csvLine(
-    cells: List[String]
-  ): String = cells.map(csvCell).mkString(",") + "\r\n"
+  def csvLine(cells: List[String]): String = cells.map(csvCell).mkString(",") + "\r\n"
 
   /** 回答の一覧の見出し。 */
-  def csvHeader(
-    qs: List[QuestionDto]
-  ): List[String] = List("番号", "回答日時", "回答者") ++ qs.map(_.label)
+  def csvHeader(qs: List[QuestionDto]): List[String] = List("番号", "回答日時", "回答者") ++ qs.map(_.label)
 
   /** 通知に載せる回答の要約（最初のいくつかの質問と回答）。 */
-  def digest(
-    qs: List[QuestionDto],
-    answers: Map[String, Json],
-    max: Int = 5
-  ): String =
+  def digest(qs: List[QuestionDto], answers: Map[String, Json], max: Int = 5): String =
     qs.flatMap(q =>
       Option(Answers.of(answers, q)).filter(_.nonEmpty).map(a => s"${q.label}: ${a.replaceAll("\\s+", " ").take(120)}")
     ).take(max).mkString("\n")

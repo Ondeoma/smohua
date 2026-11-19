@@ -14,10 +14,7 @@ import sbirds.push.{PushService, PushStore, Subscription, WebPush}
  *  - `POST /api/push/subscriptions`（PushSubscription.toJSON() の形）: この端末で受け取る
  *  - `DELETE /api/push/subscriptions`（{"endpoint": …}）: この端末で受け取るのをやめる
  */
-final class PushRoutes(
-  store: PushStore,
-  push: PushService,
-  protected val sessions: SessionAuth) extends RouteSupport {
+final class PushRoutes(store: PushStore, push: PushService, protected val sessions: SessionAuth) extends RouteSupport {
 
   val routes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case req @ GET -> Root / "api" / "push" => getPush(req)
@@ -25,18 +22,14 @@ final class PushRoutes(
     case req @ DELETE -> Root / "api" / "push" / "subscriptions" => deletePushSubscriptions(req)
   }
 
-  private def getPush(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def getPush(req: Request[IO]): IO[Response[IO]] =
     authed(req)(s =>
       store.count(s.user.id).flatMap(n =>
         Ok(Json.obj("publicKey" -> Json.fromString(push.publicKey), "subscriptions" -> Json.fromInt(n)))
       )
     )
 
-  private def postPushSubscriptions(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def postPushSubscriptions(req: Request[IO]): IO[Response[IO]] =
     sessionOnly(req)(s =>
       body[SubscribeReq](req) { r =>
         if !WebPush.allowedEndpoint(r.endpoint) then err(ErrorCode.PushEndpointNotAllowed)
@@ -51,19 +44,12 @@ final class PushRoutes(
       }
     )
 
-  private def deletePushSubscriptions(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def deletePushSubscriptions(req: Request[IO]): IO[Response[IO]] =
     authed(req)(s => body[EndpointReq](req)(r => store.unsubscribe(s.user.id, r.endpoint) *> NoContent()))
 
-  private final case class Keys(
-    p256dh: String,
-    auth: String) derives Decoder
-  private final case class SubscribeReq(
-    endpoint: String,
-    keys: Keys) derives Decoder
-  private final case class EndpointReq(
-    endpoint: String) derives Decoder
+  private final case class Keys(p256dh: String, auth: String) derives Decoder
+  private final case class SubscribeReq(endpoint: String, keys: Keys) derives Decoder
+  private final case class EndpointReq(endpoint: String) derives Decoder
 
 }
 

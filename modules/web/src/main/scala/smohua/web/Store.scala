@@ -10,17 +10,10 @@ import scala.scalajs.concurrent.JSExecutionContext.Implicits.queue
 import scala.scalajs.js
 import scala.util.{Failure, Success}
 
-final case class Toast(
-  id: Int,
-  text: String,
-  link: Option[String],
-  error: Boolean)
+final case class Toast(id: Int, text: String, link: Option[String], error: Boolean)
 
 /** サーバーから届いた変更の知らせ（番号は届くたびに増える. 各画面はこれを監視して読み直す）. */
-final case class Change(
-  seq: Int,
-  formId: Option[UUID],
-  kind: String)
+final case class Change(seq: Int, formId: Option[UUID], kind: String)
 
 /**
  * 画面全体で共有する状態と、変更の自動同期.
@@ -45,34 +38,22 @@ object Store {
 
   // ---------------------------------------------------------------- トースト
 
-  def toast(
-    text: String,
-    link: Option[String] = None,
-    error: Boolean = false
-  ): Unit = {
+  def toast(text: String, link: Option[String] = None, error: Boolean = false): Unit = {
     toastSeq += 1
     val t = Toast(toastSeq, text, link, error)
     toasts := (toasts.v :+ t).takeRight(5)
     dom.window.setTimeout(() => dismiss(t.id), if (error) 9000 else 6000)
   }
 
-  def dismiss(
-    id: Int
-  ): Unit = toasts := toasts.v.filterNot(_.id == id)
+  def dismiss(id: Int): Unit = toasts := toasts.v.filterNot(_.id == id)
 
-  def error(
-    e: Throwable
-  ): Unit = e match {
+  def error(e: Throwable): Unit = e match {
     case ApiError(401, _) => ()
     case other => toast(other.getMessage, error = true)
   }
 
   /** Future の失敗をトーストで知らせる. */
-  def report[A](
-    f: Future[A]
-  )(
-    ok: A => Unit
-  ): Unit = f.onComplete {
+  def report[A](f: Future[A])(ok: A => Unit): Unit = f.onComplete {
     case Success(a) => ok(a)
     case Failure(e) => error(e)
   }
@@ -87,10 +68,7 @@ object Store {
   // まだ流していない知らせ（短い間に続けて届いたものは1つにまとめ、各画面の読み直しを1回にする）
   private var pending: Option[(Option[UUID], String)] = None
 
-  private def emit(
-    formId: Option[UUID],
-    kind: String
-  ): Unit = pending match {
+  private def emit(formId: Option[UUID], kind: String): Unit = pending match {
     case Some((f, k)) =>
       // 別のフォーム・別の種類が混ざったら、どのフォームの何かは決めない（各画面はすべて読み直す）
       pending = Some((if (f == formId) f else None, if (k == kind) k else "sync"))
@@ -101,10 +79,7 @@ object Store {
 
   // 画面が隠れている間は流さない（見えるようになったとき sync でまとめて読み直すので、隠れたまま何度も読み直さない）
   private def flush(): Unit = pending.foreach {
-    (
-      f,
-      k
-    ) =>
+    (f, k) =>
       pending = None
       if (dom.document.visibilityState.toString == "visible") {
         changeSeq += 1
@@ -177,8 +152,7 @@ object Store {
           () => {
             dom.window.focus()
             Router.go(n.link)
-          }
-        ): js.Function0[Unit]
+          }): js.Function0[Unit]
       })
 
   def askDesktopPermission(): Unit = {
@@ -190,28 +164,21 @@ object Store {
 }
 
 /** 画面内のダイアログ（ブラウザ標準の confirm・prompt・alert の代わり）. 表示は parts/DialogHost.st. */
-final case class DialogReq(
-  message: String,
-  okLabel: String,
-  danger: Boolean,
-  input: Option[RV[String]],
-  cancel: Boolean,
-  onOk: String => Unit,
-  onCancel: () => Unit)
+final case class DialogReq(message: String,
+                           okLabel: String,
+                           danger: Boolean,
+                           input: Option[RV[String]],
+                           cancel: Boolean,
+                           onOk: String => Unit,
+                           onCancel: () => Unit)
 
 /** この端末だけの表示の設定（localStorage. 使えないときは既定値）. */
 object Prefs {
 
-  def get(
-    key: String,
-    default: String
-  ): String =
+  def get(key: String, default: String): String =
     scala.util.Try(Option(dom.window.localStorage.getItem("smohua." + key))).toOption.flatten.getOrElse(default)
 
-  def set(
-    key: String,
-    value: String
-  ): Unit = scala.util.Try(dom.window.localStorage.setItem("smohua." + key, value))
+  def set(key: String, value: String): Unit = scala.util.Try(dom.window.localStorage.setItem("smohua." + key, value))
 
 }
 
@@ -225,9 +192,7 @@ object Theme {
     if (current.v == "system") el.removeAttribute("data-theme") else el.setAttribute("data-theme", current.v)
   }
 
-  def set(
-    v: String
-  ): Unit = { current := v; Prefs.set("theme", v); apply() }
+  def set(v: String): Unit = { current := v; Prefs.set("theme", v); apply() }
 
   val options: List[(String, String)] = List("system" -> "🖥 自動（OS に合わせる）", "light" -> "☀️ ライト", "dark" -> "🌙 ダーク")
 

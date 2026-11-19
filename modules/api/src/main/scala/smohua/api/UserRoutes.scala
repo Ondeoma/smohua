@@ -15,10 +15,7 @@ import java.time.Instant
 import java.util.UUID
 
 /** 自分の情報・APIキー、ユーザーの一覧、管理画面（ユーザー・監査ログ）。 */
-final class UserRoutes(
-  users: UserStore,
-  activity: ActivityStore,
-  val sessions: SessionAuth) extends RouteSupport {
+final class UserRoutes(users: UserStore, activity: ActivityStore, val sessions: SessionAuth) extends RouteSupport {
 
   val routes: HttpRoutes[IO] = HttpRoutes.of[IO] {
     case req @ GET -> Root / "api" / "me" => getMe(req)
@@ -31,19 +28,13 @@ final class UserRoutes(
     case req @ GET -> Root / "api" / "admin" / "audit" => getAdminAudit(req)
   }
 
-  private def getMe(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def getMe(req: Request[IO]): IO[Response[IO]] =
     authed(req)(s => sessions.appNames(req).flatMap(n => Ok(me(s).copy(appNames = n))))
 
-  private def getMeApiKeys(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def getMeApiKeys(req: Request[IO]): IO[Response[IO]] =
     sessionOnly(req)(s => users.keys(s.user.id).flatMap(Ok(_)))
 
-  private def postMeApiKeys(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def postMeApiKeys(req: Request[IO]): IO[Response[IO]] =
     sessionOnly(req)(s =>
       body[CreateApiKeyReq](req) { r =>
         val scopes = r.scopes.map(_.trim.toLowerCase).distinct
@@ -70,10 +61,7 @@ final class UserRoutes(
       }
     )
 
-  private def deleteMeApiKey(
-    req: Request[IO],
-    id: UUID
-  ): IO[Response[IO]] =
+  private def deleteMeApiKey(req: Request[IO], id: UUID): IO[Response[IO]] =
     sessionOnly(req)(s =>
       users.revokeKey(s.user.id, id).flatMap {
         case true => activity.audit(Some(s.user.id), "web", "api_key.revoke", Some(id.toString), Json.obj()) *>
@@ -82,24 +70,17 @@ final class UserRoutes(
       }
     )
 
-  private def getUsers(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def getUsers(req: Request[IO]): IO[Response[IO]] =
     authed(req)(_ =>
       users.list(param(req, "q"), includeDisabled = false, intParam(req, "limit", 50, 500)).flatMap(us =>
         Ok(us.map(u => UserBrief(u.id, u.name, u.avatarUrl)))
       )
     )
 
-  private def getAdminUsers(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def getAdminUsers(req: Request[IO]): IO[Response[IO]] =
     admin(req)(_ => users.list(param(req, "q"), includeDisabled = true, 2000).flatMap(Ok(_)))
 
-  private def patchAdminUser(
-    req: Request[IO],
-    id: UUID
-  ): IO[Response[IO]] =
+  private def patchAdminUser(req: Request[IO], id: UUID): IO[Response[IO]] =
     admin(req)(s =>
       body[UpdateUserReq](req) { r =>
         if id == s.user.id && (r.isAdmin.contains(false) || r.disabled.contains(true)) then
@@ -113,9 +94,7 @@ final class UserRoutes(
       }
     )
 
-  private def getAdminAudit(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def getAdminAudit(req: Request[IO]): IO[Response[IO]] =
     admin(req)(_ =>
       activity.auditLog(
         param(req, "before").flatMap(_.toLongOption),
@@ -124,9 +103,7 @@ final class UserRoutes(
       ).flatMap(Ok(_))
     )
 
-  private def me(
-    s: AuthSession
-  ): MeDto =
+  private def me(s: AuthSession): MeDto =
     MeDto(
       s.user.id,
       s.user.name,

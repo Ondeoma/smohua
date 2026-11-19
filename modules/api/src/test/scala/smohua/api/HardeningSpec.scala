@@ -18,9 +18,7 @@ class HardeningSpec extends FunSuite {
   }
 
   test("例外の応答: 読めない本文は 400、それ以外は 500 で例外の文は出さない") {
-    def run(
-      e: Throwable
-    ) = Guards.recovered(HttpApp[IO](_ => IO.raiseError(e))).run(Request[IO]()).flatMap(r =>
+    def run(e: Throwable) = Guards.recovered(HttpApp[IO](_ => IO.raiseError(e))).run(Request[IO]()).flatMap(r =>
       r.bodyText.compile.string.map(r.status -> _)
     ).unsafeRunSync()
     val bad = run(MalformedMessageBodyFailure("Invalid JSON: unexpected token at 1:1"))
@@ -33,10 +31,7 @@ class HardeningSpec extends FunSuite {
 
   test("観測の IP は信じるプロキシの設定に合わせる（IPv6 も /64 にまとめない）") {
     val proxy = List(RateLimit.proxy("10.0.0.0/8").get)
-    def req(
-      peer: String,
-      xff: String
-    ) =
+    def req(peer: String, xff: String) =
       Request[IO](uri = uri"/").withAttribute(
         Request.Keys.ConnectionInfo,
         Request.Connection(

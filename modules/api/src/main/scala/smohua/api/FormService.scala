@@ -13,21 +13,13 @@ import smohua.shared.*
 import java.util.UUID
 
 /** フォームの操作（REST・MCP・連携サービスで共通）。権限の確認・保存・監査ログ・通知まで行う。 */
-final class FormService(
-  forms: FormStore,
-  notifier: NotifyService,
-  activity: ActivityStore,
-  cfg: ApiConfig) {
+final class FormService(forms: FormStore, notifier: NotifyService, activity: ActivityStore, cfg: ApiConfig) {
 
   private val NotFound = AppError(ErrorCode.FormNotFound)
   private val SummaryLimit = 5000
 
   /** 持ち主・編集できる人・管理者だけが見られる（それ以外には存在を見せない）。write は変更（参照専用のキーは不可）。 */
-  def access(
-    s: AuthSession,
-    id: UUID,
-    write: Boolean = false
-  ): Res[FormRow] =
+  def access(s: AuthSession, id: UUID, write: Boolean = false): Res[FormRow] =
     forms.find(id).flatMap {
       case None => IO.pure(Left(NotFound))
       case Some(f) =>
@@ -39,22 +31,12 @@ final class FormService(
     }
 
   /** 持ち主・管理者・編集できる人か。 */
-  private def visible(
-    s: AuthSession,
-    f: FormRow
-  ): IO[Boolean] =
+  private def visible(s: AuthSession, f: FormRow): IO[Boolean] =
     if f.ownerId == s.user.id || s.canAdmin then IO.pure(true) else forms.isEditor(f.id, s.user.id)
 
-  def dto(
-    s: AuthSession,
-    f: FormRow
-  ): IO[FormDto] =
+  def dto(s: AuthSession, f: FormRow): IO[FormDto] =
     (forms.editors(f.id), forms.stats(f.id), forms.briefs(List(f.ownerId))).mapN {
-      (
-        es,
-        st,
-        owner
-      ) =>
+      (es, st, owner) =>
         FormDto(
           f.id,
           f.title,
@@ -77,10 +59,7 @@ final class FormService(
         )
     }
 
-  def create(
-    s: AuthSession,
-    r: CreateFormReq
-  ): Res[FormDto] =
+  def create(s: AuthSession, r: CreateFormReq): Res[FormDto] =
     (Forms.title(r.title), Forms.normalize(r.questions.getOrElse(Nil))).tupled match {
       case Left(m) => IO.pure(Left(AppError(ErrorCode.FormInvalid, m)))
       case Right((title, qs)) =>
@@ -102,19 +81,13 @@ final class FormService(
         }
     }
 
-  def update(
-    s: AuthSession,
-    id: UUID,
-    r: UpdateFormReq
-  ): Res[FormDto] =
+  def update(s: AuthSession, id: UUID, r: UpdateFormReq): Res[FormDto] =
     access(s, id, write = true).flatMap {
       case Left(f) => IO.pure(Left(f))
       case Right(f) =>
         val status = r.status.getOrElse(f.status)
         val acc = r.access.getOrElse(f.access)
-        def invalid(
-          m: String
-        ) = AppError(ErrorCode.FormInvalid, m)
+        def invalid(m: String) = AppError(ErrorCode.FormInvalid, m)
         val checked: Either[
           AppError,
           (Option[String], Option[List[QuestionDto]], Option[FormScheduleDto], Option[FormAppearanceDto])
@@ -194,14 +167,9 @@ final class FormService(
         }
     }
 
-  private def channel(
-    n: FormNotifyDto
-  ): String = n.stuiChannel.trim.take(100)
+  private def channel(n: FormNotifyDto): String = n.stuiChannel.trim.take(100)
 
-  def delete(
-    s: AuthSession,
-    id: UUID
-  ): Res[Unit] =
+  def delete(s: AuthSession, id: UUID): Res[Unit] =
     access(s, id, write = true).flatMap {
       case Left(f) => IO.pure(Left(f))
       case Right(f) if f.ownerId != s.user.id && !s.canAdmin => IO.pure(Left(AppError(ErrorCode.FormDeleteNotOwner)))
@@ -216,10 +184,7 @@ final class FormService(
     }
 
   /** 質問と設定を写した新しいフォーム（下書き。回答は写さない）。 */
-  def duplicate(
-    s: AuthSession,
-    id: UUID
-  ): Res[FormDto] =
+  def duplicate(s: AuthSession, id: UUID): Res[FormDto] =
     access(s, id, write = true).flatMap {
       case Left(f) => IO.pure(Left(f))
       case Right(f) =>
@@ -244,20 +209,14 @@ final class FormService(
   // ---------------------------------------------------------------- 回答する側
 
   /** 回答する人に見せるフォーム。下書きは、編集できる人だけが見られる（プレビュー）。 */
-  def public(
-    s: Option[AuthSession],
-    id: UUID
-  ): Res[PublicFormDto] =
+  def public(s: Option[AuthSession], id: UUID): Res[PublicFormDto] =
     forms.find(id).flatMap {
       case None => IO.pure(Left(NotFound))
       case Some(f) =>
         val editor = s.fold(IO.pure(false))(visible(_, f))
         val done = s.filter(_ => f.oneResponse).fold(IO.pure(false))(x => forms.answered(id, x.user.id))
         (editor, done).mapN {
-          (
-            ed,
-            answered
-          ) =>
+          (ed, answered) =>
             if f.status == FormStatus.Draft && !ed then Left(NotFound)
             else {
               val needLogin = f.access == FormAccess.Login && s.isEmpty
@@ -280,11 +239,7 @@ final class FormService(
         }
     }
 
-  def submit(
-    s: Option[AuthSession],
-    id: UUID,
-    r: SubmitReq
-  ): Res[SubmittedDto] =
+  def submit(s: Option[AuthSession], id: UUID, r: SubmitReq): Res[SubmittedDto] =
     Telemetry.span("form.submit", "form.id" -> id.toString)(forms.find(id).flatMap {
       case None => IO.pure(Left(NotFound))
       case Some(f) if !f.isOpen =>
@@ -321,25 +276,15 @@ final class FormService(
 
   // ---------------------------------------------------------------- 回答を見る側
 
-  def summary(
-    f: FormRow
-  ): IO[FormSummaryStatsDto] =
+  def summary(f: FormRow): IO[FormSummaryStatsDto] =
     Telemetry.span(
       "form.summary",
       "form.id" -> f.id.toString
-    )((forms.stats(f.id), forms.answers(f.id, SummaryLimit)).mapN(
-      (
-        st,
-        as
-      ) =>
-        FormSummaryStatsDto(f.id, f.title, f.status, st._1, st._2, Forms.summarize(f.questions, as))
+    )((forms.stats(f.id), forms.answers(f.id, SummaryLimit)).mapN((st, as) =>
+      FormSummaryStatsDto(f.id, f.title, f.status, st._1, st._2, Forms.summarize(f.questions, as))
     ))
 
-  def deleteResponse(
-    s: AuthSession,
-    id: UUID,
-    responseId: UUID
-  ): Res[Unit] =
+  def deleteResponse(s: AuthSession, id: UUID, responseId: UUID): Res[Unit] =
     access(s, id, write = true).flatMap {
       case Left(f) => IO.pure(Left(f))
       case Right(_) =>
@@ -356,10 +301,7 @@ final class FormService(
     }
 
   /** 連携サービス（skiwi のブロックなど）向け: フォームの題名・状態・回答の数（見られるものだけ）。 */
-  def lookup(
-    s: AuthSession,
-    ids: List[UUID]
-  ): IO[List[Json]] = {
+  def lookup(s: AuthSession, ids: List[UUID]): IO[List[Json]] = {
     val wanted = ids.distinct
     for {
       found <- forms.findMany(wanted)

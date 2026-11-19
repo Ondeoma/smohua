@@ -12,15 +12,10 @@ object LeaveGuard {
 
   import io.github.ondeoma.scalactive.routes.Router
 
-  def install(
-    dirty: () => Boolean
-  ): () => Unit = {
+  def install(dirty: () => Boolean): () => Unit = {
     var leaving = false
     val removeGuard = Router.beforeEach {
-      (
-        to,
-        from
-      ) =>
+      (to, from) =>
         if (leaving || from.forall(f => f.path == to.path && f.search == to.search) || !dirty()) Router.Continue
         else {
           Dialog.confirm("保存していない変更があります。変更を捨てて移りますか？", "捨てて移る") {

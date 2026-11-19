@@ -24,25 +24,20 @@ import scala.concurrent.duration.*
  *  - メール（SMTP。送り先を skereru にすれば skereru に届く）と stui（POST /api/apps/notify）は、送信待ちの表（notify_outbox）に積み、
  *    裏のワーカーが送る（複数ノードは SKIP LOCKED で取り合う。失敗したら間を空けて送り直す）。
  */
-final class NotifyService(
-  forms: FormStore,
-  users: UserStore,
-  tokens: IntegrationTokenStore,
-  box: SecretBox,
-  http: Client[IO],
-  mailer: Option[Mailer],
-  push: Option[sbirds.push.PushService],
-  cfg: ApiConfig) {
+final class NotifyService(forms: FormStore,
+                          users: UserStore,
+                          tokens: IntegrationTokenStore,
+                          box: SecretBox,
+                          http: Client[IO],
+                          mailer: Option[Mailer],
+                          push: Option[sbirds.push.PushService],
+                          cfg: ApiConfig) {
 
   private val MailProvider = "mail"
   private val StuiProvider = "stui"
 
   /** 回答が届いた。who は回答した人の名前（ログインしていなければ None）。 */
-  def responseArrived(
-    f: FormRow,
-    r: ResponseRow,
-    who: Option[String]
-  ): IO[Unit] = {
+  def responseArrived(f: FormRow, r: ResponseRow, who: Option[String]): IO[Unit] = {
     val n = f.notice
     val title = s"「${f.title}」に回答が届きました"
     val body =
@@ -92,10 +87,7 @@ final class NotifyService(
     }).handleErrorWith(e => Log.report(ErrorCode.NotifyEnqueueFailed, e.toString, e))
   }
 
-  private def sendMail(
-    row: OutboxRow,
-    m: Mailer
-  ): IO[OutboxResult] =
+  private def sendMail(row: OutboxRow, m: Mailer): IO[OutboxResult] =
     users.find(row.userId).flatMap {
       case Some(u) if !u.disabled && u.email.exists(_.contains("@")) =>
         val c = row.payload.hcursor
@@ -110,10 +102,7 @@ final class NotifyService(
     }
 
   /** stui へ通知する（本人の連携のトークンで）。401 なら連携が切れているので外す。 */
-  private def sendStui(
-    row: OutboxRow,
-    c: LinkService
-  ): IO[OutboxResult] =
+  private def sendStui(row: OutboxRow, c: LinkService): IO[OutboxResult] =
     tokens.token(row.userId, StuiProvider).map(_.flatMap(box.decrypt)).flatMap {
       case None => IO.pure(OutboxResult.Skip("stui と連携していません"))
       case Some(token) =>

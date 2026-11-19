@@ -14,12 +14,11 @@ import smohua.shared.*
 import java.time.Instant
 
 /** ログイン（OIDC・開発用）・ログアウト。 */
-final class AuthRoutes(
-  oidc: Option[OidcClient],
-  users: UserStore,
-  activity: ActivityStore,
-  val sessions: SessionAuth,
-  cfg: ApiConfig)
+final class AuthRoutes(oidc: Option[OidcClient],
+                       users: UserStore,
+                       activity: ActivityStore,
+                       val sessions: SessionAuth,
+                       cfg: ApiConfig)
   extends RouteSupport {
 
   val routes: HttpRoutes[IO] = HttpRoutes.of[IO] {
@@ -30,9 +29,7 @@ final class AuthRoutes(
     case GET -> Root / "api" / "client-config" => getClientConfig()
   }
 
-  private def getAuthLogin(
-    req: Request[IO]
-  ): IO[Response[IO]] = {
+  private def getAuthLogin(req: Request[IO]): IO[Response[IO]] = {
     val back = safeReturn(param(req, "returnTo"))
     oidc match {
       case Some(o) =>
@@ -57,9 +54,7 @@ final class AuthRoutes(
     }
   }
 
-  private def getAuthCallback(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def getAuthCallback(req: Request[IO]): IO[Response[IO]] =
     (oidc, param(req, "code"), param(req, "state")) match {
       case (Some(_), _, Some(state))
           if !req.cookies.find(_.name == LoginCookie).exists(c => Crypto.constantTimeEquals(c.content, state)) =>
@@ -94,22 +89,15 @@ final class AuthRoutes(
       case _ => err(ErrorCode.LoginCodeStateRequired)
     }
 
-  private def postAuthLogout(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def postAuthLogout(req: Request[IO]): IO[Response[IO]] =
     sessions.revoke(req).flatMap {
-      (
-        idToken,
-        c
-      ) =>
+      (idToken, c) =>
         oidc.flatTraverse(_.logoutUri(idToken, s"${cfg.publicUrl.stripSuffix("/")}/")).flatMap { idp =>
           Ok(Json.obj("redirect" -> idp.fold("/")(_.renderString).asJson)).map(_.addCookie(c))
         }
     }
 
-  private def postAuthDevLogin(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def postAuthDevLogin(req: Request[IO]): IO[Response[IO]] =
     body[Json](req) { j =>
       val c = j.hcursor
       val name = c.get[String]("name").getOrElse("").trim
@@ -136,19 +124,13 @@ final class AuthRoutes(
     Ok(ClientConfigDto(cfg.devLogin && oidc.isEmpty, cfg.version, cfg.mail, cfg.stui.isDefined))
 
   /** ログイン後に戻る先（同じサイトのパスだけ）。 */
-  private def safeReturn(
-    s: Option[String]
-  ): String =
+  private def safeReturn(s: Option[String]): String =
     s.filter(localPath).getOrElse("/")
 
   private val LoginCookie = "smohua_login_state"
 
   /** ログインした: セッションを発行する。 */
-  private def loggedIn(
-    u: User,
-    via: String,
-    idToken: Option[String] = None
-  ): IO[ResponseCookie] =
+  private def loggedIn(u: User, via: String, idToken: Option[String] = None): IO[ResponseCookie] =
     sessions.issue(u, idToken).flatTap(_ =>
       activity.audit(Some(u.id), via, "auth.login", None, Json.obj()) *>
         sbirds.observe.Metrics.count("smohua.logins", "via" -> via)

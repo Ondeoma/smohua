@@ -19,11 +19,7 @@ import java.time.Instant
  * 発行するトークンは、そのユーザーの API キー（「<クライアント名> 連携」。スコープはクライアントに許したもののうち求められたもの。
  * API キーの画面から失効できる）。連携サービスはこのトークンで、本人が見られるフォームの回答・集計を読む（POST /api/forms/lookup など）。
  */
-final class OAuthRoutes(
-  oauth: OAuthStore,
-  activity: ActivityStore,
-  val sessions: SessionAuth,
-  cfg: ApiConfig)
+final class OAuthRoutes(oauth: OAuthStore, activity: ActivityStore, val sessions: SessionAuth, cfg: ApiConfig)
   extends RouteSupport {
 
   val routes: HttpRoutes[IO] = HttpRoutes.of[IO] {
@@ -33,9 +29,7 @@ final class OAuthRoutes(
     case req @ POST -> Root / "oauth" / "revoke" => postOAuthRevoke(req)
   }
 
-  private def getOAuthAuthorize(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def getOAuthAuthorize(req: Request[IO]): IO[Response[IO]] =
     validate(param(req, _)) match {
       case Left(r) => r
       case Right((c, _, _, _)) =>
@@ -85,9 +79,7 @@ final class OAuthRoutes(
         }
     }
 
-  private def postOAuthAuthorize(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def postOAuthAuthorize(req: Request[IO]): IO[Response[IO]] =
     req.as[UrlForm].attempt.flatMap {
       case Left(_) => errorPage("送られた内容が読めません。連携元の画面からやり直してください")
       case Right(u) =>
@@ -116,9 +108,7 @@ final class OAuthRoutes(
         }
     }
 
-  private def postOAuthToken(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def postOAuthToken(req: Request[IO]): IO[Response[IO]] =
     basicClient(req) match {
       case None => oauthError(Status.Unauthorized, "invalid_client", "クライアントの認証に失敗しました")
       case Some(c) =>
@@ -165,9 +155,7 @@ final class OAuthRoutes(
         }
     }
 
-  private def postOAuthRevoke(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def postOAuthRevoke(req: Request[IO]): IO[Response[IO]] =
     basicClient(req) match {
       case None => oauthError(Status.Unauthorized, "invalid_client", "クライアントの認証に失敗しました")
       case Some(c) => form(req)(f =>
@@ -178,15 +166,10 @@ final class OAuthRoutes(
   private val CodeTtlSeconds = 60L
   private val CsrfCookie = "smohua_oauth_csrf"
 
-  private def client(
-    id: String
-  ): Option[OAuthClient] = cfg.oauthClients.find(_.id == id)
+  private def client(id: String): Option[OAuthClient] = cfg.oauthClients.find(_.id == id)
 
   /** redirect_uri に結果を付けて戻す。 */
-  private def back(
-    uri: String,
-    params: (String, Option[String])*
-  ): IO[Response[IO]] = {
+  private def back(uri: String, params: (String, Option[String])*): IO[Response[IO]] = {
     val q = params.collect { case (k, Some(v)) => s"$k=${urlEncode(v)}" }.mkString("&")
     redirect(uri + (if uri.contains("?") then "&" else "?") + q)
   }
@@ -197,10 +180,7 @@ final class OAuthRoutes(
    * 許可の画面。CSP の form-action は付けない（フォームの送信後のリダイレクトの連鎖にも効くため、
    * 連携元が callback の後に別の origin へ戻すと止まる）。CSRF は Cookie と hidden の値の照合で防ぐ。
    */
-  private def page(
-    title: String,
-    body: String
-  ): IO[Response[IO]] = {
+  private def page(title: String, body: String): IO[Response[IO]] = {
     val html =
       s"""<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
          |<title>${Html.escape(title)} | smohua</title><style>
@@ -221,19 +201,14 @@ final class OAuthRoutes(
     ))
   }
 
-  private def errorPage(
-    msg: String
-  ): IO[Response[IO]] =
+  private def errorPage(msg: String): IO[Response[IO]] =
     page(
       "認可できません",
       s"<h1>認可できません</h1><p>${Html.escape(msg)}</p><p class=\"muted\">連携元のサービスの設定を確認してください。</p>"
     ).map(_.withStatus(Status.BadRequest))
 
   /** 求められたスコープ（なければ read）。クライアントに許していないものが含まれていれば None。 */
-  private def scopes(
-    c: OAuthClient,
-    requested: Option[String]
-  ): Option[List[String]] = {
+  private def scopes(c: OAuthClient, requested: Option[String]): Option[List[String]] = {
     val rs = requested.map(
       _.split(' ').map(_.trim).filter(_.nonEmpty).toList.distinct
     ).filter(_.nonEmpty).getOrElse(List("read"))
@@ -241,9 +216,8 @@ final class OAuthRoutes(
   }
 
   /** 認可の要求の確認（client_id・redirect_uri が不正ならリダイレクトしない）。 */
-  private def validate(
-    p: String => Option[String]
-  ): Either[IO[Response[IO]], (OAuthClient, String, Option[String], String)] =
+  private def validate(p: String => Option[String])
+    : Either[IO[Response[IO]], (OAuthClient, String, Option[String], String)] =
     (p("client_id").flatMap(client), p("redirect_uri")) match {
       case (None, _) => Left(errorPage("登録されていないクライアントです（client_id）"))
       case (Some(c), r) if !r.contains(c.redirectUri) => Left(errorPage("戻り先（redirect_uri）が登録されたものと一致しません"))
@@ -267,33 +241,18 @@ final class OAuthRoutes(
 
   // ---------------------------------------------------------------- トークンの発行・失効（クライアント認証は Basic）
 
-  private def oauthError(
-    status: Status,
-    code: String,
-    desc: String
-  ): IO[Response[IO]] =
+  private def oauthError(status: Status, code: String, desc: String): IO[Response[IO]] =
     IO.pure(Response[IO](status).withEntity(Json.obj("error" -> code.asJson, "error_description" -> desc.asJson))
       .putHeaders("Cache-Control" -> "no-store", "Pragma" -> "no-cache").putHeaders(
         (if status == Status.Unauthorized then List[Header.ToRaw]("WWW-Authenticate" -> "Basic realm=\"smohua\"")
          else Nil)*
       ))
 
-  private def basicClient(
-    req: Request[IO]
-  ): Option[OAuthClient] =
+  private def basicClient(req: Request[IO]): Option[OAuthClient] =
     req.headers.get[Authorization].collect { case Authorization(BasicCredentials(id, secret)) => (id, secret) }
-      .flatMap(
-        (
-          id,
-          secret
-        ) => client(id).filter(c => Crypto.constantTimeEquals(c.secret, secret))
-      )
+      .flatMap((id, secret) => client(id).filter(c => Crypto.constantTimeEquals(c.secret, secret)))
 
-  private def form(
-    req: Request[IO]
-  )(
-    f: Map[String, String] => IO[Response[IO]]
-  ): IO[Response[IO]] =
+  private def form(req: Request[IO])(f: Map[String, String] => IO[Response[IO]]): IO[Response[IO]] =
     req.as[UrlForm].attempt.flatMap {
       case Left(_) => oauthError(Status.BadRequest, "invalid_request", "application/x-www-form-urlencoded で送ってください")
       case Right(u) => f(u.values.view.mapValues(_.headOption.getOrElse("")).toMap)

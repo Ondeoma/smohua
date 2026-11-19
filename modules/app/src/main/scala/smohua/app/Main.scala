@@ -22,15 +22,14 @@ import sbirds.observe.{HttpClientTelemetry, HttpTelemetry, Metrics, RumRoutes, T
 
 import scala.concurrent.duration.*
 
-final case class AppConfig(
-  port: Int,
-  db: DbConfig,
-  oidc: Option[OidcConfig],
-  api: ApiConfig,
-  staticDir: Option[String],
-  smtp: Option[SmtpConfig],
-  appSecret: String,
-  nodeId: String)
+final case class AppConfig(port: Int,
+                           db: DbConfig,
+                           oidc: Option[OidcConfig],
+                           api: ApiConfig,
+                           staticDir: Option[String],
+                           smtp: Option[SmtpConfig],
+                           appSecret: String,
+                           nodeId: String)
 
 object Main extends IOApp.Simple {
 
@@ -100,10 +99,7 @@ object Main extends IOApp.Simple {
     } yield ()
 
   /** DB（Patroni のプライマリ）が使えるまで待ってからマイグレーションする。複数ノード同時起動でも Flyway のロックで1回だけ適用される。 */
-  private def migrateWithRetry(
-    cfg: AppConfig,
-    attempt: Int = 1
-  ): IO[Int] =
+  private def migrateWithRetry(cfg: AppConfig, attempt: Int = 1): IO[Int] =
     Database.migrate(cfg.db).handleErrorWith { e =>
       if attempt >= 60 then IO.raiseError(e)
       else
@@ -112,12 +108,8 @@ object Main extends IOApp.Simple {
     }
 
   /** DB から定期的に読むメトリクス（skorimako のダッシュボード・アラート用）。 */
-  private def gauges(
-    xa: doobie.Transactor[IO]
-  ): Resource[IO, Unit] = {
-    def q(
-      sqlText: doobie.Fragment
-    ): IO[Long] = sqlText.query[Long].unique.transact(xa)
+  private def gauges(xa: doobie.Transactor[IO]): Resource[IO, Unit] = {
+    def q(sqlText: doobie.Fragment): IO[Long] = sqlText.query[Long].unique.transact(xa)
     List(
       Metrics.gauge("smohua.users.total", "有効なユーザーの数")(q(sql"select count(*) from app_user where not disabled")),
       Metrics.gauge(
@@ -146,10 +138,7 @@ object Main extends IOApp.Simple {
   }
 
   /** ロードバランサー用のヘルスチェック。DB（プライマリ）に書けない状態なら 503。 */
-  private def healthRoutes(
-    xa: doobie.Transactor[IO],
-    node: String
-  ): HttpRoutes[IO] = HttpRoutes.of[IO] {
+  private def healthRoutes(xa: doobie.Transactor[IO], node: String): HttpRoutes[IO] = HttpRoutes.of[IO] {
     case GET -> Root / "healthz" =>
       sql"select not pg_is_in_recovery()".query[Boolean].unique.transact(xa).timeout(3.seconds).attempt.flatMap {
         case Right(true) => text(Status.Ok, s"ok $node")
@@ -160,15 +149,10 @@ object Main extends IOApp.Simple {
       }
   }
 
-  private def text(
-    status: Status,
-    body: String
-  ): IO[Response[IO]] =
+  private def text(status: Status, body: String): IO[Response[IO]] =
     IO.pure(Response[IO](status).withEntity(body)(using EntityEncoder.stringEncoder))
 
-  private def startupNotes(
-    cfg: AppConfig
-  ): IO[Unit] =
+  private def startupNotes(cfg: AppConfig): IO[Unit] =
     IO.whenA(cfg.smtp.isEmpty)(sbirds.observe.Log.println("[smohua] SMTP_HOST が未設定のため、メールの通知は送りません")) *>
       IO.whenA(cfg.api.stui.isEmpty)(sbirds.observe.Log.println("[smohua] STUI_URL が未設定のため、stui への通知は送りません")) *>
       IO.whenA(
@@ -176,12 +160,7 @@ object Main extends IOApp.Simple {
       )(sbirds.observe.Log.println("[smohua] WARNING: OIDC が未設定です。開発用のログイン（DEV_LOGIN）を使います。本番では使わないでください"))
 
   /** 期限切れのセッション・古い通知・変更履歴・送信済みの通知・監査ログ・削除したフォームを消す（1ノードだけ）。 */
-  private def purgeLoop(
-    users: UserStore,
-    forms: FormStore,
-    activity: ActivityStore,
-    lock: JobLock
-  ): IO[Unit] =
+  private def purgeLoop(users: UserStore, forms: FormStore, activity: ActivityStore, lock: JobLock): IO[Unit] =
     Periodic.run(10.minutes, 1.hour, ErrorCode.PurgeFailed)(lock.exclusive("purge", 50.minutes)(
       IO.realTimeInstant.flatMap(users.purgeExpired) *> forms.purgeNotifications(180).void *>
         forms.purgeEvents(14).void *>
@@ -189,10 +168,7 @@ object Main extends IOApp.Simple {
     ))
 
   /** ビルド済みの画面の配信。存在しないパスは index.html（SPA）。CSP は index.html の中身（インラインのスクリプトのハッシュ）から起動時に作る。 */
-  private def spa(
-    dir: String,
-    idp: Option[String]
-  ): IO[HttpRoutes[IO]] =
+  private def spa(dir: String, idp: Option[String]): IO[HttpRoutes[IO]] =
     IO.blocking(java.nio.file.Files.readString(java.nio.file.Path.of(dir, "index.html"))).map { html =>
       val csp = Guards.pageCsp(html, embed = false, RumRoutes.origin, idp)
       val embed = Guards.pageCsp(html, embed = true, RumRoutes.origin, idp)

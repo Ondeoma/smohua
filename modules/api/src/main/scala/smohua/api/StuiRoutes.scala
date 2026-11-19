@@ -22,13 +22,12 @@ import scala.concurrent.duration.*
  * 各ユーザーが OAuth 2.0（認可コード + PKCE）で stui を許可し、smohua は本人のトークンで通知を送る（POST /api/apps/notify）。
  * トークンは APP_SECRET の鍵で暗号化して保存する。state も DB に置くので、どのノードに戻ってきてもよい。
  */
-final class StuiRoutes(
-  store: IntegrationTokenStore,
-  http: Client[IO],
-  box: SecretBox,
-  activity: ActivityStore,
-  val sessions: SessionAuth,
-  cfg: ApiConfig)
+final class StuiRoutes(store: IntegrationTokenStore,
+                       http: Client[IO],
+                       box: SecretBox,
+                       activity: ActivityStore,
+                       val sessions: SessionAuth,
+                       cfg: ApiConfig)
   extends RouteSupport {
 
   val routes: HttpRoutes[IO] = HttpRoutes.of[IO] {
@@ -40,9 +39,7 @@ final class StuiRoutes(
     case req @ DELETE -> Root / "api" / "integrations" / "stui" / "connection" => deleteIntegrationsStuiConnection(req)
   }
 
-  private def getIntegrationsLinks(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def getIntegrationsLinks(req: Request[IO]): IO[Response[IO]] =
     authed(req)(s =>
       sessions.appNames(req).flatMap(names =>
         cfg.stui.toList.traverse(c =>
@@ -52,9 +49,7 @@ final class StuiRoutes(
       ).flatMap(Ok(_))
     )
 
-  private def getIntegrationsStuiConnect(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def getIntegrationsStuiConnect(req: Request[IO]): IO[Response[IO]] =
     sessionOnly(req)(s =>
       withService { c =>
         val state = Crypto.randomToken(24)
@@ -79,9 +74,7 @@ final class StuiRoutes(
       }
     )
 
-  private def getIntegrationsStuiCallback(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def getIntegrationsStuiCallback(req: Request[IO]): IO[Response[IO]] =
     sessionOnly(req)(s =>
       withService { c =>
         param(req, "state").fold(IO.pure(None))(st => store.takeState(st, P)).flatMap {
@@ -119,9 +112,7 @@ final class StuiRoutes(
       }
     )
 
-  private def deleteIntegrationsStuiConnection(
-    req: Request[IO]
-  ): IO[Response[IO]] =
+  private def deleteIntegrationsStuiConnection(req: Request[IO]): IO[Response[IO]] =
     sessionOnly(req)(s =>
       withService { c =>
         store.token(s.user.id, P).map(_.flatMap(box.decrypt)).flatMap(_.traverse_ { t =>
@@ -139,23 +130,16 @@ final class StuiRoutes(
 
   private def callback: String = s"${cfg.publicUrl}/api/integrations/$P/callback"
 
-  private def basic(
-    c: LinkService
-  ) = Authorization(BasicCredentials(c.clientId, c.clientSecret))
+  private def basic(c: LinkService) = Authorization(BasicCredentials(c.clientId, c.clientSecret))
 
   /** 個人設定へ戻る（結果を integration=…&result=… に付ける）。 */
-  private def done(
-    returnTo: String,
-    result: String
-  ): IO[Response[IO]] = {
+  private def done(returnTo: String, result: String): IO[Response[IO]] = {
     // 同じサイトのパスだけ。開発中（DEV_LOGIN）は画面の開発サーバー（http://localhost:…）にも戻せる
     val back = Option(returnTo).filter(p => localPath(p) || cfg.devOrigin(p)).getOrElse("/settings")
     redirect(back + (if back.contains("?") then "&" else "?") + s"integration=$P&result=$result")
   }
 
-  private def withService(
-    f: LinkService => IO[Response[IO]]
-  ): IO[Response[IO]] =
+  private def withService(f: LinkService => IO[Response[IO]]): IO[Response[IO]] =
     cfg.stui.fold(err(ErrorCode.StuiNotConfigured))(f)
 
 }
