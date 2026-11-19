@@ -39,7 +39,7 @@ def mine(f: FormSummaryDto): Boolean = Store.myId.contains(f.owner.id)
       <label v-if="Store.isAdmin" class="check small"><input type="checkbox" v-model="s.all" @change="load(s)"> すべての人のフォーム（管理者）</label>
     </form>
     <div v-if="empty(s)" class="empty card">
-      <img src="/logo.svg" alt="" width="96" height="96">
+      <img :src='AppNames.logo("/logo.svg").v' alt="" height="96" class="brand-logo">
       <p>フォームはまだありません。「新しいフォーム」から、アンケートや申し込みのフォームを作れます。</p>
     </div>
     <div class="cards">

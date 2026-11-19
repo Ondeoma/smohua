@@ -33,6 +33,7 @@ def mounted(s: State): Unit = {
   else Api.me().onComplete {
     case Success(me) =>
       Store.me := Some(me)
+      AppNames.set(me.appNames)
       Observe.setUser(me.id.toString)
       Store.refreshUnread()
       Store.connect()
@@ -55,7 +56,7 @@ def showHeader = Store.me.mapC(_.isDefined && !FormLook.embedded)
 <template>
   <div class="shell">
     <header v-if="showHeader" class="top">
-      <RouterLink to="/" class="brand"><img src="/logo.svg" alt="" width="28" height="28"><span>smohua</span></RouterLink>
+      <RouterLink to="/" class="brand"><img :src='AppNames.logo("/logo.svg").v' alt="" height="28" class="brand-logo"><span>{{ AppNames.self }}</span></RouterLink>
       <RouterLink to="/" class="nav hide-sp">フォーム</RouterLink>
       <span class="grow"></span>
       <RouterLink to="/activity" class="icon bell">

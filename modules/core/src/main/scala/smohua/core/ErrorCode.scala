@@ -1,0 +1,66 @@
+package smohua.core
+
+/**
+ * smohua のエラーコード（すべてのエラーをここにまとめる）.
+ * 1xxx: 認証・APIキー・共通（要求の形・回数の制限）, 2xxx: フォームの作成・編集, 3xxx: 回答（回答する側・回答の管理）,
+ * 4xxx: 外部との連携（stui・プッシュ通知）, 5xxx: ユーザー・通知の管理, 9xxx: サーバー内部・バックグラウンドの処理.
+ */
+enum ErrorCode(
+  val code: String,
+  val status: Int,
+  val message: String) extends sbirds.shared.ErrorCode {
+  case ApiKeyReadOnly extends ErrorCode("SMOHUA-1001", 403, "このAPIキーは参照専用です")
+  case OidcNotConfigured extends ErrorCode("SMOHUA-1002", 503, "OIDC が設定されていません")
+  case LoginExpired extends ErrorCode("SMOHUA-1003", 400, "ログインの有効期限が切れました。もう一度ログインしてください")
+  case LoginFailed extends ErrorCode("SMOHUA-1004", 401, "ログインできませんでした。もう一度ログインしてください")
+  case UserDisabled extends ErrorCode("SMOHUA-1005", 403, "このユーザーは無効にされています")
+  case LoginCodeStateRequired extends ErrorCode("SMOHUA-1006", 400, "code と state が必要です")
+  case NameRequired extends ErrorCode("SMOHUA-1007", 400, "名前を入力してください")
+  case NameTooLong extends ErrorCode("SMOHUA-1008", 400, "名前は100文字までにしてください")
+  case ApiKeyExpiryTooLong extends ErrorCode("SMOHUA-1009", 400, "有効期限は3650日までにしてください")
+  case ApiKeyScopeInvalid extends ErrorCode("SMOHUA-1010", 400, "スコープは read / write / admin から選んでください")
+  case ApiKeyAdminScopeAdminOnly extends ErrorCode("SMOHUA-1011", 403, "admin スコープは管理者だけが使えます")
+  case ApiKeyNotFound extends ErrorCode("SMOHUA-1012", 404, "APIキーが見つかりません")
+  case TooManyStreams extends ErrorCode("SMOHUA-1013", 429, "同時に開いている画面が多すぎます")
+  case NotLoggedIn extends ErrorCode("SMOHUA-1014", 401, "ログインしてください")
+  case ApiKeyNeedsWrite extends ErrorCode("SMOHUA-1015", 403, "このAPIキーは参照専用です（write スコープが必要です）")
+  case AdminOnly extends ErrorCode("SMOHUA-1016", 403, "管理者だけが使えます")
+  case SessionOnly extends ErrorCode("SMOHUA-1017", 403, "この操作は画面からのみ行えます")
+  case RequestBodyInvalid extends ErrorCode("SMOHUA-1018", 400, "リクエストの内容が正しくありません")
+  case TooManyRequests extends ErrorCode("SMOHUA-1019", 429, "短い時間に要求が多すぎます。しばらく待ってからもう一度試してください")
+  case CrossSiteRequest extends ErrorCode("SMOHUA-1020", 403, "別のサイトからの要求は受け付けません")
+  case BodyTooLarge extends ErrorCode("SMOHUA-1021", 413, "本文が大きすぎます")
+  case McpApiKeyRequired extends ErrorCode("SMOHUA-1022", 401, "APIキー（Authorization: Bearer）が必要です")
+  case PageNotFound extends ErrorCode("SMOHUA-1023", 404, "ページが見つかりません")
+  case FormNotFound extends ErrorCode("SMOHUA-2001", 404, "フォームが見つかりません")
+  case FormDeleteNotOwner extends ErrorCode("SMOHUA-2002", 403, "削除できるのは、持ち主と管理者だけです")
+  case LookupTooManyIds extends ErrorCode("SMOHUA-2003", 400, "ids は100件までです")
+  case FormInvalid extends ErrorCode("SMOHUA-2004", 400, "フォームの内容が正しくありません")
+  case FormStatusInvalid extends ErrorCode("SMOHUA-2005", 400, "status は … のどれかです")
+  case FormAccessInvalid extends ErrorCode("SMOHUA-2006", 400, "access は … のどれかです")
+  case FormNoQuestions extends ErrorCode("SMOHUA-2007", 400, "質問を1つ以上作ってから公開してください")
+  case FormOneResponseNeedsLogin extends ErrorCode("SMOHUA-2008", 400, "「1人1回」は、ログインした人だけが回答できるフォームで使えます")
+  case FormTooManyEditors extends ErrorCode("SMOHUA-2009", 400, "編集できる人は50人までです")
+  case FormEditorsOwnerOnly extends ErrorCode("SMOHUA-2010", 400, "編集できる人を変えられるのは、持ち主と管理者だけです")
+  case FormChannelOwnerOnly extends ErrorCode("SMOHUA-2011", 400, "stui のチャンネルを変えられるのは、持ち主と管理者だけです")
+  case FormNotAccepting extends ErrorCode("SMOHUA-3001", 409, "このフォームはいま回答を受け付けていません")
+  case ResponseAlreadySubmitted extends ErrorCode("SMOHUA-3002", 409, "このフォームには回答済みです")
+  case FormNotYetOpen extends ErrorCode("SMOHUA-3003", 409, "このフォームはまだ回答を受け付けていません")
+  case FormClosed extends ErrorCode("SMOHUA-3004", 409, "このフォームは回答を締め切りました")
+  case ResponseLoginRequired extends ErrorCode("SMOHUA-3005", 401, "回答するにはログインしてください")
+  case AnswerInvalid extends ErrorCode("SMOHUA-3006", 400, "回答の内容が正しくありません")
+  case ResponseNotFound extends ErrorCode("SMOHUA-3007", 404, "回答が見つかりません")
+  case PushEndpointNotAllowed extends ErrorCode("SMOHUA-4001", 400, "このプッシュのサービスには送れません")
+  case PushSubscriptionInvalid extends ErrorCode("SMOHUA-4002", 400, "購読の内容が正しくありません")
+  case StuiNotConfigured extends ErrorCode("SMOHUA-4003", 404, "stui との連携は設定されていません")
+  case UserSelfDemotion extends ErrorCode("SMOHUA-5001", 400, "自分自身を無効にしたり、管理者権限を外したりはできません")
+  case UserNotFound extends ErrorCode("SMOHUA-5002", 404, "ユーザーが見つかりません")
+  case NotificationIdsInvalid extends ErrorCode("SMOHUA-5003", 400, "ids は通知の ID の配列で指定してください")
+  case Unexpected extends ErrorCode("SMOHUA-9001", 500, "サーバーでエラーが発生しました")
+  case PurgeFailed extends ErrorCode("SMOHUA-9002", 500, "古いデータの掃除に失敗しました")
+  case NotifyWorkerFailed extends ErrorCode("SMOHUA-9003", 500, "通知の送信の処理に失敗しました")
+  case NotifyEnqueueFailed extends ErrorCode("SMOHUA-9004", 500, "回答の通知の登録に失敗しました")
+  case EventFeedFailed extends ErrorCode("SMOHUA-9005", 500, "画面への知らせの読み込みに失敗しました")
+  case McpToolFailed extends ErrorCode("SMOHUA-9006", 500, "MCP のツールの実行に失敗しました")
+  case HealthCheckFailed extends ErrorCode("SMOHUA-9007", 503, "ヘルスチェックで DB に接続できませんでした")
+}

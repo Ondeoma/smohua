@@ -4,7 +4,7 @@ import io.circe.Json
 import io.circe.syntax.*
 import smohua.shared.*
 
-class FormsSpec extends munit.FunSuite:
+class FormsSpec extends munit.FunSuite {
 
   private val qs = List(
     QuestionDto("name", QuestionKind.Short, "お名前", required = true),
@@ -17,32 +17,58 @@ class FormsSpec extends munit.FunSuite:
   )
 
   test("質問: 整える・だめな形を断る") {
-    val ok = Forms.normalize(List(QuestionDto("q1", QuestionKind.Single, " 色 ", options = List(" 赤 ", "", "赤", "青")))).toOption.get
+    val ok = Forms.normalize(List(QuestionDto(
+      "q1",
+      QuestionKind.Single,
+      " 色 ",
+      options = List(" 赤 ", "", "赤", "青")
+    ))).toOption.get
     assertEquals(ok.head.label, "色")
     assertEquals(ok.head.options, List("赤", "青"))
     assert(Forms.normalize(List(QuestionDto("q1", QuestionKind.Single, "色"))).isLeft) // 選択肢がない
-    assert(Forms.normalize(List(QuestionDto("q 1", QuestionKind.Short, "x"))).isLeft)  // id の形
-    assert(Forms.normalize(List(QuestionDto("a", "file", "x"))).isLeft)                // 知らない種類
-    assert(Forms.normalize(List(QuestionDto("a", QuestionKind.Short, "x"), QuestionDto("a", QuestionKind.Short, "y"))).isLeft)
+    assert(Forms.normalize(List(QuestionDto("q 1", QuestionKind.Short, "x"))).isLeft) // id の形
+    assert(Forms.normalize(List(QuestionDto("a", "file", "x"))).isLeft) // 知らない種類
+    assert(Forms.normalize(List(
+      QuestionDto("a", QuestionKind.Short, "x"),
+      QuestionDto("a", QuestionKind.Short, "y")
+    )).isLeft)
     assert(Forms.normalize(List(QuestionDto("a", QuestionKind.Scale, "x", scaleMin = 1, scaleMax = 11))).isLeft)
     assert(Forms.title("  ").isLeft)
   }
 
   test("回答: 確かめて整える") {
-    val r = Forms.validate(qs, Map(
-      "name" -> " 山田 ".asJson, "food" -> "寿司".asJson, "days" -> List("水", "月").asJson, "score" -> "4".asJson,
-      "when" -> "2026-11-17".asJson, "count" -> "3".asJson, "memo" -> "".asJson, "unknown" -> "x".asJson)).toOption.get
+    val r = Forms.validate(
+      qs,
+      Map(
+        "name" -> " 山田 ".asJson,
+        "food" -> "寿司".asJson,
+        "days" -> List("水", "月").asJson,
+        "score" -> "4".asJson,
+        "when" -> "2026-11-17".asJson,
+        "count" -> "3".asJson,
+        "memo" -> "".asJson,
+        "unknown" -> "x".asJson
+      )
+    ).toOption.get
     assertEquals(r("name"), "山田".asJson)
     assertEquals(r("days"), List("月", "水").asJson) // 選択肢の並びにそろえる
     assertEquals(r("score"), 4.asJson)
     assertEquals(r("count"), 3.asJson)
-    assert(!r.contains("memo"))    // 空の回答は入れない
+    assert(!r.contains("memo")) // 空の回答は入れない
     assert(!r.contains("unknown")) // 質問にない項目は捨てる
   }
 
   test("回答: 必須・選択肢・形の誤り") {
-    val errs = Forms.validate(qs, Map("food" -> "パン".asJson, "days" -> List("日").asJson, "score" -> 9.asJson, "when" -> "2026-02-30".asJson,
-      "count" -> "たくさん".asJson)).swap.toOption.get
+    val errs = Forms.validate(
+      qs,
+      Map(
+        "food" -> "パン".asJson,
+        "days" -> List("日").asJson,
+        "score" -> 9.asJson,
+        "when" -> "2026-02-30".asJson,
+        "count" -> "たくさん".asJson
+      )
+    ).swap.toOption.get
     assertEquals(errs.size, 6) // name（必須）と5つの誤り
     assert(errs.head.contains("お名前"))
     assert(Forms.validate(qs, Map("name" -> Json.Null)).isLeft)
@@ -53,7 +79,8 @@ class FormsSpec extends munit.FunSuite:
     val as = List(
       Map("name" -> "A".asJson, "food" -> "寿司".asJson, "days" -> List("月", "火").asJson, "score" -> 5.asJson),
       Map("name" -> "B".asJson, "food" -> "寿司".asJson, "days" -> List("火").asJson, "score" -> 2.asJson),
-      Map("name" -> "C".asJson, "food" -> "そば".asJson))
+      Map("name" -> "C".asJson, "food" -> "そば".asJson)
+    )
     val s = Forms.summarize(qs, as).map(x => x.id -> x).toMap
     assertEquals(s("food").counts, List(CountDto("寿司", 2), CountDto("カレー", 0), CountDto("ラーメン", 0), CountDto("そば", 1)))
     assertEquals(s("days").counts, List(CountDto("月", 1), CountDto("火", 2), CountDto("水", 0)))
@@ -71,7 +98,12 @@ class FormsSpec extends munit.FunSuite:
   }
 
   test("見た目: 色の形・文言の長さ・外のサイトを読み込む CSS を断る") {
-    val ok = Forms.appearance(FormAppearanceDto(background = " #FFF ", accent = "#0f766e", submitLabel = " 申し込む ", css = ".fill h1 { color: red; }"))
+    val ok = Forms.appearance(FormAppearanceDto(
+      background = " #FFF ",
+      accent = "#0f766e",
+      submitLabel = " 申し込む ",
+      css = ".fill h1 { color: red; }"
+    ))
     assertEquals(ok.map(a => (a.background, a.accent, a.submitLabel)), Right(("#fff", "#0f766e", "申し込む")))
     assert(Forms.appearance(FormAppearanceDto(text = "red")).isLeft)
     assert(Forms.appearance(FormAppearanceDto(submitLabel = "あ" * 31)).isLeft)
@@ -102,5 +134,8 @@ class FormsSpec extends munit.FunSuite:
 
   test("戻り先: 同じサイトのパスだけ（//・/\\・制御文字・絶対 URL は断る）") {
     List("/", "/forms/1?x=//a", "/f/abc").foreach(p => assert(Paths.isLocal(p), p))
-    List("", "//evil.example", "/\\evil.example", "https://evil.example/", "javascript:alert(1)", "/a\nb").foreach(p => assert(!Paths.isLocal(p), p))
+    List("", "//evil.example", "/\\evil.example", "https://evil.example/", "javascript:alert(1)", "/a\nb").foreach(p =>
+      assert(!Paths.isLocal(p), p)
+    )
   }
+}

@@ -196,6 +196,9 @@ table.list tr.clickable:hover td { background: var(--hover); }
 header.top a.brand { display: inline-flex; align-items: center; gap: .45rem; font-weight: 800; font-size: 1.1rem; color: var(--fg); letter-spacing: .01em; }
 header.top a.brand:hover { text-decoration: none; }
 header.top a.brand img { border-radius: 7px; }
+/* ロゴ（AppNames.logo。sruru のアイコンは横長のこともある）は高さだけ固定し、幅は画像に合わせる */
+img.brand-logo { width: auto; max-width: 160px; object-fit: contain; }
+header.top a.brand img.brand-logo { max-width: 120px; }
 header.top a.nav { color: var(--muted); padding: .3rem .6rem; border-radius: 7px; font-size: .92rem; }
 header.top a.nav:hover { background: var(--hover); color: var(--fg); text-decoration: none; }
 header.top a.icon { font-size: 1.1rem; padding: .2rem .4rem; border-radius: 7px; color: var(--fg); position: relative; flex: none; }

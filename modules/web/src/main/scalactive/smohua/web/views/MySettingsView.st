@@ -28,9 +28,9 @@ def mounted(s: State): Unit = {
   val q = new dom.URL(dom.window.location.href).searchParams
   Option(q.get("integration")).foreach { p =>
     q.get("result") match {
-      case "connected" => Store.toast(s"$p と連携しました")
-      case "denied"    => Store.toast(s"$p との連携は許可されませんでした", error = true)
-      case _           => Store.toast(s"$p と連携できませんでした。もう一度お試しください", error = true)
+      case "connected" => Store.toast(s"${AppNames.nameOf(p)} と連携しました")
+      case "denied"    => Store.toast(s"${AppNames.nameOf(p)} との連携は許可されませんでした", error = true)
+      case _           => Store.toast(s"${AppNames.nameOf(p)} と連携できませんでした。もう一度お試しください", error = true)
     }
     dom.window.history.replaceState(null, "", "/settings")
   }
@@ -88,7 +88,7 @@ def via(k: ApiKeyDto): String = k.client.fold("")(c => s"（$c 連携）")
           <div class="muted small">{{ myEmail }}</div>
         </div>
       </div>
-      <p class="muted small">名前とアイコンは、ログインに使うサービス（sruru）で登録したものです。sruru で変えると、次にログインしたときに反映されます（アイコンを外したときも同じです）。</p>
+      <p class="muted small">名前とアイコンは、ログインに使うサービス（{{ AppNames.of("sruru") }}）で登録したものです。{{ AppNames.of("sruru") }} で変えると、次にログインしたときに反映されます（アイコンを外したときも同じです）。</p>
     </section>
 
     <section class="panel">
@@ -104,12 +104,12 @@ def via(k: ApiKeyDto): String = k.client.fold("")(c => s"（$c 連携）")
       <h2>通知</h2>
       <label class="check"><input type="checkbox" :checked="s.desktop.v" @change="setDesktop(s, Dom.checked(event))"> 画面を開いていないとき、デスクトップに通知を出す（この端末）</label>
       <p><PushToggle /></p>
-      <p class="muted small">回答が届いたときに知らせるかどうか（smohua の通知・メール・stui）は、フォームごとに「設定」で選びます。</p>
+      <p class="muted small">回答が届いたときに知らせるかどうか（{{ AppNames.self }} の通知・メール・{{ AppNames.of("stui") }}）は、フォームごとに「設定」で選びます。</p>
     </section>
 
     <section v-for="l in s.links" class="panel">
       <h2>{{ l.name }} 連携</h2>
-      <p class="muted small">フォームに回答が届いたとき、stui（チャット）のあなた宛ての DM、またはフォームの設定で選んだチャンネルに知らせます（<code>{{ l.url }}</code>）。</p>
+      <p class="muted small">フォームに回答が届いたとき、{{ AppNames.of("stui") }}（チャット）のあなた宛ての DM、またはフォームの設定で選んだチャンネルに知らせます（<code>{{ l.url }}</code>）。</p>
       <div class="row">
         <span v-if="l.connected" class="badge cat-done">連携しています</span>
         <span v-else class="badge">連携していません</span>
@@ -121,7 +121,7 @@ def via(k: ApiKeyDto): String = k.client.fold("")(c => s"（$c 連携）")
 
     <section class="panel">
       <h2>APIキー（REST API・MCP）</h2>
-      <p class="muted small">プログラムや AI（MCP）から smohua を使うためのキーです。<code>Authorization: Bearer &lt;キー&gt;</code> で送ります。
+      <p class="muted small">プログラムや AI（MCP）から {{ AppNames.self }} を使うためのキーです。<code>Authorization: Bearer &lt;キー&gt;</code> で送ります。
         権限は「あなたの権限」と「キーのスコープ」の両方を満たす範囲です。</p>
       <form @submit.prevent="createKey(s)">
         <div class="row">

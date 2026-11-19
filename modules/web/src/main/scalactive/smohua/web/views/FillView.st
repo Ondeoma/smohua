@@ -80,7 +80,7 @@ def showForm(s: State) = computed { s.done.v.isEmpty && s.form.v.isDefined }
 <template>
   <div class="page narrow fill">
     <div v-if="s.notFound" class="card center">
-      <img src="/logo.svg" alt="" width="80" height="80">
+      <img :src='AppNames.logo("/logo.svg").v' alt="" height="80" class="brand-logo">
       <h1>フォームが見つかりません</h1>
       <p class="muted">URL が正しいか確かめてください。まだ公開されていないか、削除された可能性があります。</p>
     </div>
@@ -138,7 +138,7 @@ def showForm(s: State) = computed { s.done.v.isEmpty && s.form.v.isDefined }
         </form>
       </template>
     </div>
-    <p v-if="branding(s)" class="powered muted small">smohua のフォーム</p>
+    <p v-if="branding(s)" class="powered muted small">{{ AppNames.self }} のフォーム</p>
   </div>
 </template>
 

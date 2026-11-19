@@ -124,7 +124,7 @@ def needLink(s: State) = computed { s.stui.v && !s.stuiLinked.v }
 
       <section class="panel">
         <h2>回答の画面の見た目</h2>
-        <p class="muted small">ほかのサイトに埋め込むときに、サイトに合わせて変えられます。色は空なら smohua の既定の色（明るい・暗いテーマに合わせる）です。</p>
+        <p class="muted small">ほかのサイトに埋め込むときに、サイトに合わせて変えられます。色は空なら {{ AppNames.self }} の既定の色（明るい・暗いテーマに合わせる）です。</p>
         <ColorField label="背景色" :value="s.bg" />
         <ColorField label="カードの色" :value="s.card" />
         <ColorField label="文字色" :value="s.text" />
@@ -133,7 +133,7 @@ def needLink(s: State) = computed { s.stui.v && !s.stuiLinked.v }
         <div class="toggles">
           <label class="check"><input type="checkbox" v-model="s.showTitle"> 題名を出す</label>
           <label class="check"><input type="checkbox" v-model="s.showDesc"> 説明を出す</label>
-          <label class="check"><input type="checkbox" v-model="s.showBrand"> 「smohua のフォーム」を出す</label>
+          <label class="check"><input type="checkbox" v-model="s.showBrand"> 「{{ AppNames.self }} のフォーム」を出す</label>
           <label class="check"><input type="checkbox" v-model="s.showAnon"> 「この回答は匿名で送られます」を出す</label>
         </div>
         <details class="adv">
@@ -154,14 +154,14 @@ def needLink(s: State) = computed { s.stui.v && !s.stuiLinked.v }
       <section class="panel">
         <h2>回答が届いたときの知らせ</h2>
         <p class="muted small">持ち主と、編集できる人に知らせます。</p>
-        <label class="check"><input type="checkbox" v-model="s.inApp"> smohua の通知（🔔）とプッシュ通知</label>
+        <label class="check"><input type="checkbox" v-model="s.inApp"> {{ AppNames.self }} の通知（🔔）とプッシュ通知</label>
         <label v-if="hasMail" class="check"><input type="checkbox" v-model="s.mail"> メール</label>
-        <label v-if="hasStui" class="check"><input type="checkbox" v-model="s.stui"> stui（チャット）</label>
+        <label v-if="hasStui" class="check"><input type="checkbox" v-model="s.stui"> {{ AppNames.of("stui") }}（チャット）</label>
         <div v-if="s.stui" class="sub">
           <label class="field"><span>投稿するチャンネル（空なら、連携している人それぞれに DM で知らせます）</span>
             <input type="text" v-model="s.stuiChannel" placeholder="例: 総務" maxlength="100" :disabled="notOwner(s)"></label>
-          <p v-if="needLink(s)" class="small warn">stui と連携していません。<a href="/settings" @click.prevent='Router.go("/settings")'>個人設定</a>の「stui 連携」で連携すると届きます。</p>
-          <p class="muted small">チャンネルへの投稿は、持ち主の stui の連携を使います（持ち主がそのチャンネルに参加している必要があります）。チャンネルを変えられるのは、持ち主と管理者だけです。</p>
+          <p v-if="needLink(s)" class="small warn">{{ AppNames.of("stui") }} と連携していません。<a href="/settings" @click.prevent='Router.go("/settings")'>個人設定</a>の「{{ AppNames.of("stui") }} 連携」で連携すると届きます。</p>
+          <p class="muted small">チャンネルへの投稿は、持ち主の {{ AppNames.of("stui") }} の連携を使います（持ち主がそのチャンネルに参加している必要があります）。チャンネルを変えられるのは、持ち主と管理者だけです。</p>
         </div>
       </section>
 

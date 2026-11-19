@@ -1,27 +1,16 @@
 package smohua.api
 
+import sbirds.http.RateLimit
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import com.comcast.ip4s.*
 import munit.FunSuite
 import org.http4s.*
 import org.http4s.implicits.*
-import smohua.auth.ProviderMetadata
-import smohua.notify.Mail
+import sbirds.mail.Mail
 
-/** 外とのやり取りの守り（OIDC のディスカバリー・メールのヘッダー・例外の応答・IP）。DB は使わない。 */
-class HardeningSpec extends FunSuite:
-
-  private val meta = ProviderMetadata("https://idp.example.com", uri"https://idp.example.com/authorize", uri"https://idp.example.com/token")
-
-  test("OIDC: ディスカバリーの issuer は設定と同じで、https の issuer ならトークンエンドポイントも https") {
-    assertEquals(ProviderMetadata.check(meta, "https://idp.example.com/"), Right(meta))
-    assert(ProviderMetadata.check(meta.copy(issuer = "https://evil.example.com"), "https://idp.example.com").isLeft)
-    assert(ProviderMetadata.check(meta.copy(tokenEndpoint = uri"http://idp.example.com/token"), "https://idp.example.com").isLeft)
-    // 開発用の http の IdP はそのまま
-    val dev = ProviderMetadata("http://localhost:9000", uri"http://localhost:9000/authorize", uri"http://localhost:9000/token")
-    assertEquals(ProviderMetadata.check(dev, "http://localhost:9000"), Right(dev))
-  }
+/** 外とのやり取りの守り（メールのヘッダー・例外の応答・IP）。DB は使わない。 */
+class HardeningSpec extends FunSuite {
 
   test("メール: 件名・宛名の改行は空白にする（ヘッダーの差し込みを防ぐ）") {
     assertEquals(Mail.headerValue("「題名」に回答\r\nBcc: evil@example.com"), "「題名」に回答  Bcc: evil@example.com")
@@ -29,7 +18,11 @@ class HardeningSpec extends FunSuite:
   }
 
   test("例外の応答: 読めない本文は 400、それ以外は 500 で例外の文は出さない") {
-    def run(e: Throwable) = Guards.recover(e).flatMap(r => r.bodyText.compile.string.map(r.status -> _)).unsafeRunSync()
+    def run(
+      e: Throwable
+    ) = Guards.recovered(HttpApp[IO](_ => IO.raiseError(e))).run(Request[IO]()).flatMap(r =>
+      r.bodyText.compile.string.map(r.status -> _)
+    ).unsafeRunSync()
     val bad = run(MalformedMessageBodyFailure("Invalid JSON: unexpected token at 1:1"))
     assertEquals(bad._1, Status.BadRequest)
     assert(!bad._2.contains("unexpected"), bad._2)
@@ -39,13 +32,23 @@ class HardeningSpec extends FunSuite:
   }
 
   test("観測の IP は信じるプロキシの設定に合わせる（IPv6 も /64 にまとめない）") {
-    val proxy = List(RateLimitConfig.proxy("10.0.0.0/8").get)
-    def req(peer: String, xff: String) =
-      Request[IO](uri = uri"/").withAttribute(Request.Keys.ConnectionInfo,
-        Request.Connection(SocketAddress(ip"127.0.0.1", port"8080"), SocketAddress(IpAddress.fromString(peer).get, port"5000"), secure = false))
+    val proxy = List(RateLimit.proxy("10.0.0.0/8").get)
+    def req(
+      peer: String,
+      xff: String
+    ) =
+      Request[IO](uri = uri"/").withAttribute(
+        Request.Keys.ConnectionInfo,
+        Request.Connection(
+          SocketAddress(ip"127.0.0.1", port"8080"),
+          SocketAddress(IpAddress.fromString(peer).get, port"5000"),
+          secure = false
+        )
+      )
         .putHeaders("X-Forwarded-For" -> xff)
     assertEquals(RateLimit.clientIp(req("10.1.1.1", "2001:db8::1:2"), proxy), Some("2001:db8::1:2"))
     assertEquals(RateLimit.clientKey(req("10.1.1.1", "2001:db8::1:2"), proxy), Some("2001:db8::/64"))
     // 信じないプロキシから来た X-Forwarded-For は読まない
     assertEquals(RateLimit.clientIp(req("203.0.113.5", "198.51.100.9"), proxy), Some("203.0.113.5"))
   }
+}

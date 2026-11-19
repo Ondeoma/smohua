@@ -43,7 +43,7 @@ def me(u: UserDto): Boolean = Store.myId.contains(u.id)
     </nav>
     <div v-if='isTab(s, "users")'>
       <form class="row" @submit.prevent="loadUsers(s)"><input type="search" v-model="s.q" placeholder="名前・メールで絞り込み"><button type="submit">検索</button></form>
-      <p class="muted small">ユーザーは初めてログインしたときに作られます。名前とアイコンは、ログインのたびに IdP（sruru）のものを写します。
+      <p class="muted small">ユーザーは初めてログインしたときに作られます。名前とアイコンは、ログインのたびに IdP（{{ AppNames.of("sruru") }}）のものを写します。
         IdP のグループ（ADMIN_GROUPS）に入っている人は、ここでの設定によらず管理者です。</p>
       <div class="table-wrap">
         <table class="list">

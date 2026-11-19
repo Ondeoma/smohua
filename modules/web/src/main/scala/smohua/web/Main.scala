@@ -11,9 +11,12 @@ import org.scalajs.dom
  */
 object Main {
 
-  def main(args: Array[String]): Unit = {
+  def main(
+    args: Array[String]
+  ): Unit = {
     ScalactiveConfig.titleTemplate = "%s | smohua"
     ScalactiveConfig.defaultTitle = Some("smohua")
+    AppNames.init("smohua")
     Store.startSync()
     Theme.apply()
     // skorimako のブラウザの観測（設定があるときだけ）、PWA（ホーム画面に追加・オフラインで開く・プッシュ通知）
