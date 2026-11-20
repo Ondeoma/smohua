@@ -158,37 +158,44 @@ object Forms {
     val colors =
       List("背景色" -> a.background, "カードの色" -> a.card, "文字色" -> a.text, "強調色" -> a.accent).map((n, v) => n -> v.trim)
     val css = a.css.replace("\r\n", "\n").trim
-    val lower = unescapeCss(css).toLowerCase.replaceAll("\\s+", "").replaceAll("/\\*.*?\\*/", "")
+    // ブラウザが URL を読むときと同じに見る: \ は / と同じ（"/\host" は "//host"）、制御文字と空白は URL の頭や途中から除かれる
+    val flat = unescapeCss(css).toLowerCase.replace('\\', '/').replaceAll("[\\x00-\\x20]+", "")
+    // コメントを除いた形と除かない形の両方で確かめる（文字列の中の /* … */ はコメントではないので、除くだけだとその間に隠せる）
+    val views = List(flat, flat.replaceAll("/\\*.*?\\*/", ""))
+    def has(s: String): Boolean = views.exists(_.contains(s))
     colors.collectFirst { case (n, v) if v.nonEmpty && !ColorRe.matches(v) => s"${n}は #rgb か #rrggbb の形で入力してください" }
       .toLeft(())
       .flatMap(_ =>
         Either.cond(a.submitLabel.trim.length <= MaxSubmitLabel, (), s"送信ボタンの文言は${MaxSubmitLabel}文字までにしてください")
       )
       .flatMap(_ => Either.cond(css.length <= MaxCss, (), s"CSS は${MaxCss}文字までにしてください"))
-      .flatMap(_ => Either.cond(!lower.contains("@import"), (), "CSS に @import は使えません"))
+      .flatMap(_ => Either.cond(!has("@import"), (), "CSS に @import は使えません"))
       // url() のほか image-set() の文字列からも読み込めるので、http(s): と // で始まる参照をまとめて断る
       .flatMap(_ =>
         Either.cond(
-          !lower.contains("http:") && !lower.contains("https:") && !"(url\\(|[\"'])//".r.findFirstIn(lower).isDefined,
+          !has("http:") && !has("https:") && !views.exists(v => "(url\\(|[\"'])//".r.findFirstIn(v).isDefined),
           (),
           "CSS で外のサイトは読み込めません（url() は data: だけ使えます）"
         )
       )
-      .flatMap(_ => Either.cond(!lower.contains("</"), (), "CSS に </ は使えません"))
+      .flatMap(_ => Either.cond(!css.contains("</") && !has("</"), (), "CSS に </ は使えません"))
       .map { _ =>
         val c = colors.map(_._2.toLowerCase)
         a.copy(background = c(0), card = c(1), text = c(2), accent = c(3), submitLabel = a.submitLabel.trim, css = css)
       }
   }
 
-  /** CSS のエスケープ（\\75 や \\u など）を戻す（エスケープで @import・url() の確認をすり抜けられないように）。 */
+  /**
+   * CSS のエスケープ（\\75 や \\u など）を戻す（エスケープで @import・url() の確認をすり抜けられないように）。
+   * \\ の直後の改行は、文字列の中では「行の続き」で何も残らない（"ht\\<改行>tp:" は "http:"）。
+   */
   private[core] def unescapeCss(css: String): String =
-    "\\\\(?:([0-9a-fA-F]{1,6})\\s?|(.))".r.replaceAllIn(
+    "(?s)\\\\(?:([0-9a-fA-F]{1,6})\\s?|(.))".r.replaceAllIn(
       css,
       m =>
-        java.util.regex.Matcher.quoteReplacement(Option(m.group(1)).fold(Option(m.group(2)).getOrElse(""))(h =>
-          scala.util.Try(new String(Character.toChars(Integer.parseInt(h, 16)))).getOrElse("")
-        ))
+        java.util.regex.Matcher.quoteReplacement(Option(m.group(1)).fold(
+          Option(m.group(2)).filterNot(c => c == "\n" || c == "\r" || c == "\f").getOrElse("")
+        )(h => scala.util.Try(new String(Character.toChars(Integer.parseInt(h, 16)))).getOrElse("")))
     )
 
   /** 受付期間（始まりは終わりより前）。 */

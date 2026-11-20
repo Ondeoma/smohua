@@ -1,21 +1,22 @@
 package smohua.api
 
 import cats.effect.*
-import io.circe.Decoder
 import org.http4s.*
 import org.http4s.circe.CirceEntityCodec.*
-import org.http4s.dsl.Http4sDsl
 import smohua.core.*
-import sbirds.http.Errors
+import sbirds.http.{Errors, RouteHelpers}
 import sbirds.shared.AppError
 
-import java.util.UUID
-
 /**
- * *Routes に共通の補助（エラー応答・認証・リクエスト本文）。
+ * *Routes に共通の補助（エラー応答・認証）。本文・クエリ・パスの UUID・302 は sbirds.http.RouteHelpers。
  */
-trait RouteSupport extends Http4sDsl[IO] {
+trait RouteSupport extends RouteHelpers {
   protected def sessions: SessionAuth
+
+  protected def bodyInvalid: sbirds.shared.ErrorCode = ErrorCode.RequestBodyInvalid
+
+  // 本文の読み取りの途中のエラー（大きすぎる本文を含む）は、これまでどおり RequestBodyInvalid（400）にする
+  override protected def bodyKeepsAppError: Boolean = false
 
   /** エラーの応答（コード付きでログに出る）. detail を省くとコードの既定の文言. */
   protected def err(code: ErrorCode, detail: String | Null = null): IO[Response[IO]] =
@@ -54,29 +55,9 @@ trait RouteSupport extends Http4sDsl[IO] {
   protected def sessionOnly(req: Request[IO])(f: AuthSession => IO[Response[IO]]): IO[Response[IO]] =
     authed(req)(s => if s.isSession then f(s) else err(ErrorCode.SessionOnly))
 
-  protected def body[A: Decoder](req: Request[IO])(f: A => IO[Response[IO]]): IO[Response[IO]] =
-    req.as[A].attempt.flatMap {
-      case Left(e) => err(ErrorCode.RequestBodyInvalid, s"リクエストの内容が正しくありません: ${e.getMessage.take(200)}")
-      case Right(b) => f(b)
-    }
-
-  protected object UuidVar {
-    def unapply(s: String): Option[UUID] = uuidOpt(s)
-  }
-
-  /** 302 で移す（Cookie を付けるときは cookie）。 */
-  protected def redirect(to: String, cookie: Option[ResponseCookie] = None): IO[Response[IO]] = {
-    val r = Response[IO](Status.Found).putHeaders(org.http4s.headers.Location(Uri.unsafeFromString(to)))
-    IO.pure(cookie.fold(r)(r.addCookie))
-  }
-
   protected def urlEncode(s: String): String = java.net.URLEncoder.encode(s, "UTF-8")
 
   /** 同じサイトの中のパスか（ログイン・連携の後に戻る先）。 */
-  protected def localPath(p: String): Boolean = smohua.shared.Paths.isLocal(p)
+  protected def localPath(p: String): Boolean = sbirds.shared.SafePath.isLocal(p)
 
-  protected def param(req: Request[IO], k: String): Option[String] = req.params.get(k).map(_.trim).filter(_.nonEmpty)
-
-  protected def intParam(req: Request[IO], k: String, default: Int, max: Int): Int =
-    param(req, k).flatMap(_.toIntOption).map(v => math.max(1, math.min(v, max))).getOrElse(default)
 }

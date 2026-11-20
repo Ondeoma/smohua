@@ -1,6 +1,7 @@
 package smohua.api
 
 import cats.effect.*
+import sbirds.http.RateLimitConfig
 import sbirds.shared.AppError
 
 import scala.concurrent.duration.*
@@ -16,7 +17,9 @@ final case class ApiConfig(adminGroups: Set[String],
                            oauthClients: List[OAuthClient] = Nil,
                            stui: Option[LinkService] = None,
                            mail: Boolean = false,
-                           rateLimit: RateLimitConfig = RateLimitConfig()) {
+                           rateLimit: RateLimitConfig = RateLimitConfig(),
+                           /** 回答の送信（匿名のフォームへの大量投稿を防ぐ）の、IP ごとの1分あたりの回数（0 なら制限しない）。 */
+                           rateLimitSubmit: Int = 20) {
 
   /** 開発中（DEV_LOGIN）だけ、画面の開発サーバー（http://localhost:…・http://127.0.0.1:…）も自分のサイトとして扱う。 */
   def devOrigin(url: String): Boolean = devLogin &&
@@ -36,10 +39,7 @@ final case class LinkService(provider: String,
 }
 
 /** 認可を求める外部のサービス（OAUTH_CLIENTS で登録する。skiwi など）。redirectUri は完全一致で照合する。scopes は許すスコープ（read・write）。 */
-final case class OAuthClient(id: String,
-                             secret: String,
-                             redirectUri: String,
-                             name: String,
-                             scopes: List[String] = List("read"))
+type OAuthClient = sbirds.oauth.OAuthClient
+val OAuthClient = sbirds.oauth.OAuthClient
 
 type Res[A] = IO[Either[AppError, A]]

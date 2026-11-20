@@ -1,6 +1,6 @@
 package smohua.api
 
-import sbirds.http.RateLimit
+import sbirds.http.{RateLimit, RateLimitConfig}
 import cats.effect.*
 import cats.syntax.all.*
 import com.comcast.ip4s.*
@@ -66,7 +66,7 @@ class GuardsSpec extends CatsEffectSuite {
   test("回数の制限: 匿名のフォームへの回答の送信は、IP ごとに1分あたりの上限まで") {
     val clock = IO.pure(10.minutes)
     val app =
-      RateLimits(ok, RateLimitConfig(authPerMinute = 2, publicPerMinute = 100, submitPerMinute = 3), clock).orNotFound
+      RateLimits(ok, RateLimitConfig(authPerMinute = 2, publicPerMinute = 100), 3, clock).orNotFound
     val submit = uri"/api/public/forms/abc/responses"
     for {
       rs <- List.fill(4)(app.run(from("203.0.113.5", Method.POST, submit))).sequence

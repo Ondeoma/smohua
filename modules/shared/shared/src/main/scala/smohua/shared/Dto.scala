@@ -361,10 +361,6 @@ object Paths {
 
   /** 回答する人に渡す URL. */
   def fill(id: UUID): String = s"/f/$id"
-
-  /** 同じサイトの中のパスか（ログイン・連携の後に戻る先. "//…"・"/\…" は別のサイトになるので除く）. サーバーと画面で同じ確かめ方をする. */
-  def isLocal(p: String): Boolean = p.startsWith("/") && !p.startsWith("//") && !p.startsWith("/\\") &&
-    !p.exists(_.isControl)
 }
 
 object Html {

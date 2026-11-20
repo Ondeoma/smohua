@@ -116,7 +116,16 @@ class FormsSpec extends munit.FunSuite {
       ".x { background: url( '//evil.example/t.png') }",
       ".x { background: \\75 rl(http://evil.example/t.png) }",
       ".x { background: image-set(\"https://evil.example/t.png\" 1x) }",
-      ".x { content: '</style>' }"
+      ".x { content: '</style>' }",
+      // \ は URL では / と同じ（"/\\host" は "//host"）
+      ".x { background: url(\"/\\\\evil.example/t.png\") }",
+      ".x { background: url('\\\\\\\\evil.example/t.png') }",
+      // \ と改行は、文字列の中では何も残らない
+      ".x { background: url(\"ht\\\ntps://evil.example/t.png\") }",
+      // URL の頭の制御文字は除かれる
+      ".x { background: url(\"\\1 //evil.example/t.png\") }",
+      // 文字列の中の /* … */ はコメントではない
+      ".x { content: \"/*\" } .y { background: url(\"//evil.example/t.png\") } .z { content: \"*/\" }"
     ).foreach(css => assert(Forms.appearance(FormAppearanceDto(css = css)).isLeft, css))
   }
 
@@ -133,9 +142,9 @@ class FormsSpec extends munit.FunSuite {
   }
 
   test("戻り先: 同じサイトのパスだけ（//・/\\・制御文字・絶対 URL は断る）") {
-    List("/", "/forms/1?x=//a", "/f/abc").foreach(p => assert(Paths.isLocal(p), p))
+    List("/", "/forms/1?x=//a", "/f/abc").foreach(p => assert(sbirds.shared.SafePath.isLocal(p), p))
     List("", "//evil.example", "/\\evil.example", "https://evil.example/", "javascript:alert(1)", "/a\nb").foreach(p =>
-      assert(!Paths.isLocal(p), p)
+      assert(!sbirds.shared.SafePath.isLocal(p), p)
     )
   }
 }

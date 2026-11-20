@@ -1,17 +1,15 @@
 package smohua.api
 
 import cats.effect.*
-import cats.syntax.all.*
 import io.circe.Json
 import io.circe.syntax.*
 import org.http4s.*
 import org.http4s.circe.CirceEntityCodec.*
-import sbirds.auth.{Crypto, LoginResult, OidcClient}
+import sbirds.auth.{LoginResult, OidcClient}
+import sbirds.http.{Errors, OidcLoginFlow}
 import smohua.core.*
 import smohua.db.*
 import smohua.shared.*
-
-import java.time.Instant
 
 /** ログイン（OIDC・開発用）・ログアウト。 */
 final class AuthRoutes(oidc: Option[OidcClient],
@@ -29,71 +27,74 @@ final class AuthRoutes(oidc: Option[OidcClient],
     case GET -> Root / "api" / "client-config" => getClientConfig()
   }
 
-  private def getAuthLogin(req: Request[IO]): IO[Response[IO]] = {
-    val back = safeReturn(param(req, "returnTo"))
-    oidc match {
-      case Some(o) =>
-        val state = Crypto.randomToken(); val verifier = Crypto.randomToken(48); val nonce = Crypto.randomToken()
-        // state をこのブラウザの Cookie にも入れ、戻ってきたときに照合する（他人のログインを踏ませる攻撃を防ぐ）
-        users.saveLoginState(state, verifier, nonce, back) *> o.authorizationUri(state, verifier, nonce).flatMap(u =>
-          redirect(
-            u.renderString,
-            Some(ResponseCookie(
-              LoginCookie,
-              state,
-              path = Some("/auth"),
-              httpOnly = true,
-              secure = cfg.cookieSecure,
-              sameSite = Some(SameSite.Lax),
-              maxAge = Some(900)
-            ))
-          )
-        )
-      case None if cfg.devLogin => redirect(s"/login?returnTo=${urlEncode(back)}")
-      case None => err(ErrorCode.OidcNotConfigured)
-    }
-  }
+  private def getAuthLogin(req: Request[IO]): IO[Response[IO]] = OidcLoginFlow.login(flow)(req)
 
-  private def getAuthCallback(req: Request[IO]): IO[Response[IO]] =
-    (oidc, param(req, "code"), param(req, "state")) match {
-      case (Some(_), _, Some(state))
-          if !req.cookies.find(_.name == LoginCookie).exists(c => Crypto.constantTimeEquals(c.content, state)) =>
-        err(ErrorCode.LoginExpired)
-      case (Some(o), Some(code), Some(state)) =>
-        users.takeLoginState(state).flatMap {
-          case None => err(ErrorCode.LoginExpired)
-          case Some((verifier, nonce, back)) =>
-            o.authenticate(code, verifier, nonce, Instant.now()).attempt.flatMap {
-              case Left(e) =>
-                // 詳しい理由（IdP の応答など）は監査ログにだけ残し、画面には出さない
-                activity.audit(
-                  None,
-                  "web",
-                  "auth.denied",
-                  None,
-                  Json.obj("error" -> String.valueOf(e.getMessage).take(500).asJson)
-                ) *>
-                  err(ErrorCode.LoginFailed)
-              case Right(LoginResult(id, idToken)) =>
-                for {
-                  // アイコンは IdP（sruru）の picture をそのまま写す（外されていれば外す）
-                  u <- users.upsert(id.sub, id.name, id.email, id.picture, cfg.timezone)
-                  r <- if u.disabled then err(ErrorCode.UserDisabled)
-                  else
-                    users.syncGroups(u.id, id.groups) *>
-                      loggedIn(u, "web", Some(idToken)).flatMap(c => redirect(back, Some(c)))
-                } yield r
-            }
-        }
-      case (None, _, _) => err(ErrorCode.OidcNotConfigured)
-      case _ => err(ErrorCode.LoginCodeStateRequired)
+  private def getAuthCallback(req: Request[IO]): IO[Response[IO]] = OidcLoginFlow.callback(flow)(req)
+
+  /** OIDC のログインの流れ（sbirds.http.OidcLoginFlow）に差し込む、smohua の部分。 */
+  private val flow = new OidcLoginFlow.Host[LoginResult] {
+    val idp = oidc.map(OidcLoginFlow.Idp(_))
+    // state をこのブラウザの Cookie にも入れ、戻ってきたときに照合する（他人のログインを踏ませる攻撃を防ぐ）
+    val cookie = OidcLoginFlow.StateCookie(
+      "smohua_login_state",
+      cfg.cookieSecure,
+      maxAge = 900,
+      clear = OidcLoginFlow.Clear.Never,
+      checkWithoutCode = true
+    )
+
+    def returnTo(req: Request[IO]): String = safeReturn(param(req, "returnTo"))
+    def saveState(state: String, verifier: String, nonce: String, returnTo: String): IO[Unit] =
+      users.saveLoginState(state, verifier, nonce, returnTo)
+    def takeState(state: String): IO[Option[(String, String, String)]] = users.takeLoginState(state)
+    def redirect(to: String): IO[Response[IO]] = AuthRoutes.this.redirect(to)
+
+    def withoutIdp(req: Request[IO], back: String): IO[Response[IO]] =
+      if cfg.devLogin then AuthRoutes.this.redirect(s"/login?returnTo=${urlEncode(back)}")
+      else err(ErrorCode.OidcNotConfigured)
+
+    def failed(req: Request[IO], f: OidcLoginFlow.Failure): IO[Response[IO]] = {
+      import OidcLoginFlow.Failure.*
+      // 詳しい理由（IdP の応答など）は監査ログにだけ残し、画面には出さない
+      def denied(e: Throwable) = activity.audit(
+        None,
+        "web",
+        "auth.denied",
+        None,
+        Json.obj("error" -> String.valueOf(e.getMessage).take(500).asJson)
+      ) *> err(ErrorCode.LoginFailed)
+      f match {
+        case NotConfigured => err(ErrorCode.OidcNotConfigured)
+        case ParamsMissing => err(ErrorCode.LoginCodeStateRequired)
+        case BrowserMismatch | Expired => err(ErrorCode.LoginExpired)
+        case Denied(e) => denied(e)
+        case Failed(e) => denied(e)
+        case IdpError(e, _) => Errors.respondLogged(ErrorCode.LoginFailed, e.take(100), Some(req))
+      }
     }
+
+    def loggedIn(req: Request[IO], res: LoginResult, back: String): IO[Response[IO]] =
+      for {
+        // アイコンは IdP（sruru）の picture をそのまま写す（外されていれば外す）
+        u <- users.upsert(
+          res.identity.sub,
+          res.identity.name,
+          res.identity.email,
+          res.identity.picture,
+          cfg.timezone
+        )
+        r <- if u.disabled then err(ErrorCode.UserDisabled)
+        else
+          users.syncGroups(u.id, res.identity.groups) *>
+            AuthRoutes.this.loggedIn(u, "web", Some(res.idToken)).flatMap(c => AuthRoutes.this.redirect(back, Some(c)))
+      } yield r
+  }
 
   private def postAuthLogout(req: Request[IO]): IO[Response[IO]] =
     sessions.revoke(req).flatMap {
       (idToken, c) =>
-        oidc.flatTraverse(_.logoutUri(idToken, s"${cfg.publicUrl.stripSuffix("/")}/")).flatMap { idp =>
-          Ok(Json.obj("redirect" -> idp.fold("/")(_.renderString).asJson)).map(_.addCookie(c))
+        OidcLoginFlow.logoutRedirect(oidc, idToken, s"${cfg.publicUrl.stripSuffix("/")}/").flatMap { to =>
+          Ok(Json.obj("redirect" -> to.asJson)).map(_.addCookie(c))
         }
     }
 
@@ -125,9 +126,7 @@ final class AuthRoutes(oidc: Option[OidcClient],
 
   /** ログイン後に戻る先（同じサイトのパスだけ）。 */
   private def safeReturn(s: Option[String]): String =
-    s.filter(localPath).getOrElse("/")
-
-  private val LoginCookie = "smohua_login_state"
+    sbirds.shared.SafePath.orElse(s)
 
   /** ログインした: セッションを発行する。 */
   private def loggedIn(u: User, via: String, idToken: Option[String] = None): IO[ResponseCookie] =

@@ -1,48 +1,20 @@
 package smohua.app
 
+import sbirds.http.Env.*
+import sbirds.db.*
 import cats.effect.*
 import cats.syntax.all.*
 import smohua.api.*
 import sbirds.auth.OidcConfig
-import smohua.db.*
+import sbirds.http.RateLimitConfig
 import sbirds.mail.SmtpConfig
 
 /** 設定は環境変数から読む。 */
 object Config {
-  private def opt(name: String): Option[String] = sys.env.get(name).map(_.trim).filter(_.nonEmpty)
-  private def int(name: String): Option[Int] = opt(name).flatMap(_.toIntOption)
-  private def enabled(name: String): Boolean = opt(name).exists(_.equalsIgnoreCase("true"))
-  private def required(name: String): Either[String, String] = opt(name).toRight(s"環境変数 $name を設定してください")
-  private def list(name: String): List[String] = opt(name).toList.flatMap(_.split(',').map(_.trim).filter(_.nonEmpty))
 
-  /** OAUTH_CLIENTS: [{"id":"skiwi","secret":"…","redirectUri":"https://…/api/integrations/smohua/callback","name":"skiwi","scopes":["read"]}] */
-  private def oauthClients: Either[String, List[smohua.api.OAuthClient]] =
-    opt("OAUTH_CLIENTS").fold(Right(Nil)) { s =>
-      io.circe.parser.parse(s).flatMap(_.as[List[io.circe.Json]]).left.map(_ =>
-        "OAUTH_CLIENTS は JSON の配列で指定してください"
-      ).flatMap(_.traverse { j =>
-        val c = j.hcursor
-        (c.get[String]("id"), c.get[String]("secret"), c.get[String]("redirectUri")).tupled.toOption
-          .filter((id, sec, uri) =>
-            id.nonEmpty && sec.length >= 16 &&
-              (uri.startsWith("https://") ||
-                "^http://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?/".r.findFirstIn(uri).isDefined)
-          )
-          .map((id, sec, uri) =>
-            smohua.api.OAuthClient(
-              id,
-              sec,
-              uri,
-              c.get[String]("name").getOrElse(id),
-              c.get[List[String]]("scopes").toOption.map(_.filter(Set(
-                "read",
-                "write"
-              ))).filter(_.nonEmpty).getOrElse(List("read"))
-            )
-          )
-          .toRight("OAUTH_CLIENTS の各要素には id・secret（16文字以上）・redirectUri（https://。開発中は http://localhost:…/ も可）を指定してください")
-      })
-    }
+  /** カンマ区切りの一覧（グループの名前は空白を含むことがあるので、Env.list と違って空白では区切らない）。 */
+  private def commaList(name: String): List[String] =
+    opt(name).toList.flatMap(_.split(',').map(_.trim).filter(_.nonEmpty))
 
   def load: IO[AppConfig] = IO.fromEither(
     (for {
@@ -50,7 +22,8 @@ object Config {
       dbUser <- required("DATABASE_USER")
       dbPass <- required("DATABASE_PASSWORD")
       pub <- required("PUBLIC_URL")
-      devLogin = enabled("DEV_LOGIN")
+      // 開発用のログインは名前だけでだれにでも（管理者にも）なれるので、手元（localhost）で開くときだけ（sbirds.http.Env.devLogin）
+      devLogin <- devLogin(pub)
       _ <- Either.cond(!(devLogin && pub.startsWith("https://")), (), "DEV_LOGIN（開発用のログイン）は https の PUBLIC_URL では使えません")
       oidc <- (opt("OIDC_ISSUER"), opt("OIDC_CLIENT_ID"), opt("OIDC_CLIENT_SECRET")) match {
         case (Some(_), Some(_), Some(_)) if devLogin =>
@@ -72,10 +45,10 @@ object Config {
         case None if devLogin => Right("smohua-development-secret")
         case None => Left("APP_SECRET（16文字以上の秘密の値）を設定してください")
       }
-      clients <- oauthClients
-      proxies <- list("TRUSTED_PROXIES").traverse(s =>
-        sbirds.http.RateLimit.proxy(s).toRight(s"TRUSTED_PROXIES の「$s」は IP か CIDR で書いてください")
-      )
+      clients <- sbirds.oauth.OAuthClient.fromEnv(sbirds.oauth.OAuthClient.Rules(itemError =
+        "OAUTH_CLIENTS の各要素には id・secret（16文字以上）・redirectUri（https://。開発中は http://localhost:…/ も可）を指定してください"
+      ))
+      rate <- RateLimitConfig.fromEnv()
       tz <- opt("TIMEZONE").getOrElse("Asia/Tokyo") match {
         case z if scala.util.Try(java.time.ZoneId.of(z)).isSuccess => Right(z)
         case z => Left(s"TIMEZONE が正しくありません: $z（例: Asia/Tokyo）")
@@ -87,7 +60,7 @@ object Config {
         db = DbConfig(dbUrl, dbUser, dbPass, int("DATABASE_POOL_SIZE").getOrElse(10)),
         oidc = oidc,
         api = ApiConfig(
-          adminGroups = list("ADMIN_GROUPS").toSet,
+          adminGroups = commaList("ADMIN_GROUPS").toSet,
           cookieSecure = base.startsWith("https://"),
           publicUrl = base,
           devLogin = devLogin,
@@ -105,12 +78,9 @@ object Config {
           ),
           mail = opt("SMTP_HOST").isDefined,
           // ログインしなくても使える入口の、IP ごとの1分あたりの回数（0 なら制限しない）
-          rateLimit = RateLimitConfig(
-            int("RATE_LIMIT_AUTH").getOrElse(20),
-            int("RATE_LIMIT_PUBLIC").getOrElse(120),
-            int("RATE_LIMIT_SUBMIT").getOrElse(20),
-            proxies
-          )
+          rateLimit = rate,
+          // そのうち、回答の送信の回数
+          rateLimitSubmit = int("RATE_LIMIT_SUBMIT").getOrElse(20)
         ),
         staticDir = opt("STATIC_DIR"),
         // メールの通知（SMTP）。送り先を skereru にすれば skereru に届く

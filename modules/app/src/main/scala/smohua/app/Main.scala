@@ -1,20 +1,18 @@
 package smohua.app
 
+import sbirds.db.*
 import cats.effect.*
 import cats.syntax.all.*
 import com.comcast.ip4s.*
 import doobie.implicits.*
-import fs2.io.file.Path
 import org.http4s.*
-import org.http4s.dsl.io.*
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
-import org.http4s.server.staticcontent.*
 import smohua.api.*
 import sbirds.auth.{OidcClient, OidcConfig}
 import smohua.auth.SecretBox
 import smohua.core.ErrorCode
-import sbirds.http.Errors
+import sbirds.http.{Errors, Health, Spa}
 import smohua.db.*
 import sbirds.links.IntegrationTokenStore
 import sbirds.mail.{SmtpConfig, SmtpMailer}
@@ -72,19 +70,30 @@ object Main extends IOApp.Simple {
         loops = List[IO[Unit]](notifier.outboxLoop, feed.loop, purgeLoop(users, forms, activity, lock))
         _ <- loops.traverse_(_.background)
         rest =
-          healthRoutes(xa, cfg.nodeId) <+>
+          // ロードバランサー用のヘルスチェック。DB（プライマリ）に書けない状態なら 503
+          // （例外の文〈接続先のホストなど〉は外に出さず、ログにだけ残す）
+          Health.routes(
+            Database.isPrimary(xa),
+            s"ok ${cfg.nodeId}",
+            e => sbirds.observe.Log.report(ErrorCode.HealthCheckFailed, e.toString)
+          ) <+>
             new AuthRoutes(oidc, users, activity, sess, cfg.api).routes <+>
             new UserRoutes(users, activity, sess).routes <+>
             new FormRoutes(forms, svc, sess).routes <+>
             new StreamRoutes(feed, sess).routes <+>
-            new OAuthRoutes(new OAuthStore(xa), activity, sess, cfg.api).routes <+>
+            new OAuthRoutes(
+              new sbirds.oauth.OAuthKeyStore(xa, revokeOnReuse = true),
+              activity,
+              sess,
+              cfg.api
+            ).routes <+>
             new StuiRoutes(tokens, http, box, activity, sess, cfg.api).routes <+>
             RumRoutes.routes <+>
             new PushRoutes(pushStore, push, sess).routes
         app = rest <+> new McpRoutes(rest, sess, cfg.api.publicUrl).routes
         all <- Resource.eval(cfg.staticDir.traverse(spa(_, cfg.oidc.map(_.issuer)))).map(_.fold(app)(app <+> _))
         httpApp <- HttpTelemetry(
-          Guards.recovered(Guards(RateLimits(all, cfg.api.rateLimit), cfg.api).orNotFound),
+          Guards.recovered(Guards(RateLimits(all, cfg.api.rateLimit, cfg.api.rateLimitSubmit), cfg.api).orNotFound),
           List("/api", "/auth", "/mcp", "/oauth"),
           sbirds.http.RateLimit.clientIp(_, cfg.api.rateLimit.trustedProxies)
         )
@@ -137,21 +146,6 @@ object Main extends IOApp.Simple {
     ).sequence_
   }
 
-  /** ロードバランサー用のヘルスチェック。DB（プライマリ）に書けない状態なら 503。 */
-  private def healthRoutes(xa: doobie.Transactor[IO], node: String): HttpRoutes[IO] = HttpRoutes.of[IO] {
-    case GET -> Root / "healthz" =>
-      sql"select not pg_is_in_recovery()".query[Boolean].unique.transact(xa).timeout(3.seconds).attempt.flatMap {
-        case Right(true) => text(Status.Ok, s"ok $node")
-        case Right(false) => text(Status.ServiceUnavailable, "database is read-only (not primary)")
-        // 例外の文（接続先のホストなど）は外に出さず、ログにだけ残す
-        case Left(e) => sbirds.observe.Log.report(ErrorCode.HealthCheckFailed, e.toString) *>
-            text(Status.ServiceUnavailable, "database unavailable")
-      }
-  }
-
-  private def text(status: Status, body: String): IO[Response[IO]] =
-    IO.pure(Response[IO](status).withEntity(body)(using EntityEncoder.stringEncoder))
-
   private def startupNotes(cfg: AppConfig): IO[Unit] =
     IO.whenA(cfg.smtp.isEmpty)(sbirds.observe.Log.println("[smohua] SMTP_HOST が未設定のため、メールの通知は送りません")) *>
       IO.whenA(cfg.api.stui.isEmpty)(sbirds.observe.Log.println("[smohua] STUI_URL が未設定のため、stui への通知は送りません")) *>
@@ -169,22 +163,14 @@ object Main extends IOApp.Simple {
 
   /** ビルド済みの画面の配信。存在しないパスは index.html（SPA）。CSP は index.html の中身（インラインのスクリプトのハッシュ）から起動時に作る。 */
   private def spa(dir: String, idp: Option[String]): IO[HttpRoutes[IO]] =
-    IO.blocking(java.nio.file.Files.readString(java.nio.file.Path.of(dir, "index.html"))).map { html =>
+    Spa.indexHtml(dir).map { html =>
       val csp = Guards.pageCsp(html, embed = false, RumRoutes.origin, idp)
       val embed = Guards.pageCsp(html, embed = true, RumRoutes.origin, idp)
-      val files = fileService[IO](FileService.Config(dir))
-      val index = HttpRoutes.of[IO] {
-        case req @ GET -> _
-            if !Set("api", "auth", "mcp", "oauth").exists(p => req.pathInfo.renderString.startsWith("/" + p)) =>
-          StaticFile.fromPath(Path(dir) / "index.html", Some(req)).getOrElseF(Errors.respond(ErrorCode.PageNotFound))
-      }
-      HttpRoutes[IO] { req =>
-        val cc =
-          if req.pathInfo.renderString.startsWith("/assets/") then "public, max-age=31536000, immutable" else "no-cache"
-        (files <+> index).run(req).map(_.putHeaders(
-          "Cache-Control" -> cc,
-          "Content-Security-Policy" -> (if Guards.embeddable(req) then embed else csp)
-        ))
-      }
+      Spa.routes(
+        dir,
+        Spa.startsWith("api", "auth", "mcp", "oauth"),
+        notFound = Errors.respond(ErrorCode.PageNotFound),
+        finish = (req, r) => r.putHeaders("Content-Security-Policy" -> (if Guards.embeddable(req) then embed else csp))
+      )
     }
 }

@@ -94,11 +94,11 @@ STATIC_DIR=dist/static java -cp 'dist/lib/*' smohua.app.Main
 | `OTEL_EXPORTER_OTLP_ENDPOINT`・`OTEL_EXPORTER_OTLP_HEADERS` | skorimako へログ・トレース・メトリクスを送る（例: `https://skorimako.example.com`・`Authorization=Bearer <取り込み用のキー>`） |
 | `SKORIMAKO_RUM_URL`・`SKORIMAKO_RUM_TOKEN` | ブラウザの観測（表示の速さ・JavaScript のエラー） |
 | `VAPID_SUBJECT` | プッシュ通知の連絡先（`mailto:` か `https:`。省略すると `PUBLIC_URL`） |
-| `RATE_LIMIT_AUTH`・`RATE_LIMIT_PUBLIC`・`RATE_LIMIT_SUBMIT` | IP ごとの1分あたりの回数の上限（ログイン 20・回答する側の API 120・回答の送信 20。0 なら制限しない。ノードごとに数える） |
+| `RATE_LIMIT_AUTH`・`RATE_LIMIT_PUBLIC`・`RATE_LIMIT_SUBMIT` | IP ごとの1分あたりの回数の上限（ログインと OAuth の認可の画面〈`/auth/…`・`/oauth/authorize`〉20・OAuth のトークンの発行・失効〈`/oauth/token`・`/oauth/revoke`〉と回答する側の API〈`/api/public/…`〉120・回答の送信 20。0 なら制限しない。ノードごとに数える） |
 | `TRUSTED_PROXIES` | リバースプロキシの IP か CIDR（カンマ区切り）。ここから来た要求だけ `X-Forwarded-For` を信じて、回数を数える IP とトレースの `client.address` を決める |
 | `LOG_FORMAT`（`text`・`json`）・`LOG_LEVEL` | 標準出力のログ |
 | `NODE_ID` | ノードの名前（ログとリースに出る。省略するとホスト名から作る） |
-| `DEV_LOGIN` | `true` で開発用のログイン（名前だけ）。https の `PUBLIC_URL`・OIDC とは同時に使えない |
+| `DEV_LOGIN` | `true` で開発用のログイン（名前だけ）。`PUBLIC_URL` が localhost（`localhost`・`127.0.0.1`・`[::1]`・`*.localhost`）のときだけ使える（それ以外では起動しない）。https の `PUBLIC_URL`・OIDC とは同時に使えない |
 
 ## 兄弟のサービスとの連携
 

@@ -1,5 +1,6 @@
 package smohua.api
 
+import sbirds.db.*
 import sbirds.links.IntegrationTokenStore
 import cats.effect.*
 import cats.syntax.all.*

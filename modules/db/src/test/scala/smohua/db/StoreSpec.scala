@@ -1,5 +1,6 @@
 package smohua.db
 
+import sbirds.db.*
 import cats.effect.*
 import cats.syntax.all.*
 import io.circe.Json
