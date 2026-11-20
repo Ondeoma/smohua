@@ -1,5 +1,6 @@
 package smohua.web
 
+import io.github.ondeoma.scalactive.routes.Router
 import org.scalajs.dom
 import smohua.shared.*
 
@@ -9,7 +10,7 @@ object FormLook {
   private val Id = "smohua-form-look"
 
   /** iframe で埋め込んだとき（?embed=1）. ヘッダーを出さない. */
-  def embedded: Boolean = new dom.URLSearchParams(dom.window.location.search).has("embed")
+  def embedded: Boolean = Router.query.v.contains("embed")
 
   /** 色の設定を CSS の変数に置き換えた CSS（設定した色だけ. 文字色から、薄い文字・線の色も作る）. */
   def css(a: FormAppearanceDto): String = {

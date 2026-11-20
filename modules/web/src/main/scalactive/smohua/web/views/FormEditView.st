@@ -4,7 +4,6 @@ import smohua.web.parts.*
 import smohua.shared.*
 
 import java.util.UUID
-import scala.scalajs.concurrent.JSExecutionContext.Implicits.queue
 
 // フォームの編集: 題名・説明と、質問の追加・並べ替え・削除. 「保存」を押すまでは保存しない
 // （保存していない変更があれば、ほかの画面へ移る前・ページを閉じる前に確かめる）.
@@ -16,8 +15,7 @@ case class QEdit(id: String, kind: RV[String], label: RV[String], help: RV[Strin
 case class Props(formId: UUID)
 
 case class State(form: RV[Option[FormDto]] = RV(None), title: RV[String] = RV(""), desc: RV[String] = RV(""), qs: RV[List[QEdit]] = RV(Nil),
-                 saving: RV[Boolean] = RV(false), newKind: RV[String] = RV(QuestionKind.Short), saved: RV[String] = RV(""),
-                 unguard: RV[Option[() => Unit]] = RV(None))
+                 save: ActionState = useAction(), newKind: RV[String] = RV(QuestionKind.Short), saved: RV[String] = RV(""))
 
 def initState() = State()
 
@@ -42,11 +40,9 @@ def show(s: State, f: FormDto): Unit = {
 def dirty(s: State): Boolean = s.form.v.exists(_.canEdit) && snapshot(s) != s.saved.v
 
 def mounted(s: State, props: Props): Unit = {
-  Store.report(Api.form(props.formId))(show(s, _))
-  s.unguard := Some(LeaveGuard.install(() => dirty(s)))
+  Toasts.report(Api.form(props.formId))(show(s, _))
+  LeaveGuard.install(() => dirty(s))
 }
-
-def unmounted(s: State): Unit = { s.unguard.v.foreach(_()); s.unguard := None }
 
 // 回答は質問の id に結び付くので、id は一度決めたら変えない
 def newId(): String = "q" + (1 to 8).map(_ => "abcdefghijklmnopqrstuvwxyz0123456789".charAt((scala.scalajs.js.Math.random() * 36).toInt)).mkString
@@ -70,13 +66,8 @@ def move(s: State, q: QEdit, d: Int): Unit = {
   if (i >= 0 && j >= 0 && j < l.size) s.qs := l.updated(i, l(j)).updated(j, l(i))
 }
 
-def save(s: State, props: Props): Unit = {
-  s.saving := true
-  Api.updateForm(props.formId, request(s)).onComplete { r =>
-    s.saving := false
-    r.fold(Store.error, f => { show(s, f); Store.toast("保存しました") })
-  }
-}
+def save(s: State, props: Props): Unit =
+  Toasts.report(s.save.run(Api.updateForm(props.formId, request(s)))) { f => show(s, f); Toasts.show("保存しました") }
 
 def kinds: List[(String, String)] = QuestionKind.all.map(k => k -> QuestionKind.label(k))
 def forms(s: State) = s.form.mapC(_.toList)
@@ -120,7 +111,7 @@ def nums(from: Int, to: Int): List[String] = (from to to).toList.map(_.toString)
         <select v-model="s.newKind"><option v-for="k in kinds" :value="k._1">{{ k._2 }}</option></select>
         <button @click="add(s)">＋ 質問を追加</button>
         <span class="grow"></span>
-        <button class="primary" :disabled="s.saving" @click="save(s, props)">保存</button>
+        <button class="primary" :disabled="s.save.busy" @click="save(s, props)">保存</button>
       </div>
     </div>
   </div>

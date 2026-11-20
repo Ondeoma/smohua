@@ -1,7 +1,6 @@
 <script lang="scala">
 import io.github.ondeoma.scalactive.components.routes.RouterComponent
 import org.scalajs.dom
-import smohua.shared.*
 import smohua.web.parts.*
 import smohua.web.views.*
 
@@ -46,7 +45,7 @@ def mounted(s: State): Unit = {
 def logout(): Unit = Api.logout().onComplete(r => dom.window.location.href = r.getOrElse("/"))
 
 def userName = Store.me.mapC(_.map(_.name).getOrElse(""))
-def meBrief = Store.me.mapC(_.map(m => UserBrief(m.id, m.name, m.avatarUrl)))
+def meBrief = Store.me.mapC(_.map(m => Person(m.id.toString, m.name, m.avatarUrl)))
 def unreadLabel = Store.unread.mapC(n => if (n > 99) "99+" else n.toString)
 def hasUnread = Store.unread.mapC(_ > 0)
 /** iframe で埋め込んだ回答の画面（?embed=1）では、ヘッダーを出さない. */
@@ -73,16 +72,11 @@ def showHeader = Store.me.mapC(_.isDefined && !FormLook.embedded)
       </div>
     </header>
     <main class="content">
-      <RouterComponent v-if="s.ready" :routes="routes" />
+      <RouterComponent v-if="s.ready" :routes="routes" :reloadOnQueryChange="false" />
     </main>
   </div>
   <DialogHost />
-  <div class="toasts">
-    <div v-for="t in Store.toasts" :key="t.id" :class='if (t.error) "toast error" else "toast"'>
-      <span class="grow" @click="t.link.foreach(l => Router.go(l)); Store.dismiss(t.id)">{{ t.text }}</span>
-      <button @click="Store.dismiss(t.id)">×</button>
-    </div>
-  </div>
+  <ToastHost />
 </template>
 
 <style scoped>

@@ -3,12 +3,18 @@ import smohua.web.*
 import smohua.web.parts.*
 import smohua.shared.*
 
+import scala.scalajs.concurrent.JSExecutionContext.Implicits.queue
+
 // フォームの一覧（自分が持ち主か、編集できるもの）. ここから新しいフォームを作る.
-case class State(forms: RV[List[FormSummaryDto]] = RV(Nil), q: RV[String] = RV(""), all: RV[Boolean] = RV(false), loading: RV[Boolean] = RV(true))
+case class State(q: RV[String], all: RV[Boolean], forms: AsyncState[List[FormSummaryDto]])
 
-def initState() = State()
+def initState() = {
+  val q = RV(""); val all = RV(false)
+  State(q, all, useAsync(Api.forms(q.v.trim, all.v), immediate = false))
+}
 
-def load(s: State): Unit = Store.report(Api.forms(s.q.v.trim, s.all.v)) { fs => s.forms := fs; s.loading := false }
+// 読み直しが重なったときは、最後のものだけを出す
+def load(s: State): Unit = s.forms.reload().failed.foreach(Toasts.error)
 
 def mounted(s: State): Unit = {
   pageTitle("フォーム")
@@ -18,12 +24,13 @@ def mounted(s: State): Unit = {
 }
 
 def create(): Unit = Dialog.prompt("新しいフォームの題名", "無題のフォーム", "作る") { t =>
-  Store.report(Api.createForm(t))(f => Router.go(Paths.form(f.id)))
+  Toasts.report(Api.createForm(t))(f => Router.go(Paths.form(f.id)))
 }
 
 def open(f: FormSummaryDto): Unit = Router.go(if (f.responseCount > 0) Paths.responses(f.id) else Paths.form(f.id))
 
-def empty(s: State) = computed { s.forms.v.isEmpty && !s.loading.v }
+def empty(s: State) = s.forms.data.mapC(_.exists(_.isEmpty))
+def list(s: State) = s.forms.data.mapC(_.getOrElse(Nil))
 def mine(f: FormSummaryDto): Boolean = Store.myId.contains(f.owner.id)
 </script>
 
@@ -43,7 +50,7 @@ def mine(f: FormSummaryDto): Boolean = Store.myId.contains(f.owner.id)
       <p>フォームはまだありません。「新しいフォーム」から、アンケートや申し込みのフォームを作れます。</p>
     </div>
     <div class="cards">
-      <a v-for="f in s.forms" :key="f.id" class="card form" :href="Paths.form(f.id)" @click.prevent="open(f)">
+      <a v-for="f in list(s)" :key="f.id" class="card form" :href="Paths.form(f.id)" @click.prevent="open(f)">
         <div class="row">
           <b class="grow name">{{ f.title }}</b>
           <span :class='"badge st-" + f.status'>{{ FormStatus.label(f.status) }}</span>
@@ -51,7 +58,7 @@ def mine(f: FormSummaryDto): Boolean = Store.myId.contains(f.owner.id)
         <div class="count"><span class="num">{{ f.responseCount }}</span> 件の回答</div>
         <div class="muted small">{{ f.lastResponseAt.map(t => "最後の回答 " + Fmt.ago(t)).getOrElse("まだ回答はありません") }}・質問 {{ f.questionCount }} 個</div>
         <div class="row muted small foot">
-          <Avatar :user="Some(f.owner)" :size="18" /><span class="grow">{{ if (mine(f)) "自分のフォーム" else f.owner.name }}</span>
+          <Avatar :user="Some(Fmt.person(f.owner))" :size="18" /><span class="grow">{{ if (mine(f)) "自分のフォーム" else f.owner.name }}</span>
           <span>{{ Fmt.ago(f.updatedAt) }}に更新</span>
         </div>
       </a>

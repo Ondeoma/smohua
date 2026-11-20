@@ -25,7 +25,7 @@ def load(s: State, props: Props, kind: String = "sync"): Unit = {
   // 読み込んである件数までを読み直す（少なくとも100件）
   val rows = if (kind.startsWith("form.")) Future.successful(None)
              else Api.responses(props.formId, None, math.min(500, math.max(100, s.rows.v.size))).map(Some(_))
-  Store.report(form.zip(rows)) { (f, p) =>
+  Toasts.report(form.zip(rows)) { (f, p) =>
     f.foreach { x => s.form := Some(x); pageTitle(x.title + " の回答") }
     p.foreach { x =>
       s.rows := x.responses; s.total := x.total; Store.refreshUnread()
@@ -35,7 +35,7 @@ def load(s: State, props: Props, kind: String = "sync"): Unit = {
     val key = s"${s.total.v}:${s.rows.v.headOption.map(_.id)}:${s.form.v.map(_.updatedAt)}"
     if (key != s.statsKey.v) {
       s.statsKey := key
-      Store.report(Api.summary(props.formId))(st => s.stats := Some(st))
+      Toasts.report(Api.summary(props.formId))(st => s.stats := Some(st))
     }
   }
 }
@@ -51,7 +51,7 @@ def more(s: State, props: Props): Unit =
 def setView(s: State, v: String): Unit = { s.view := v; Prefs.set("responses.view", v) }
 
 def remove(s: State, props: Props, r: ResponseDto): Unit = Dialog.confirm(s"回答 #${r.seq} を削除しますか？", "削除する") {
-  Store.report(Api.deleteResponse(props.formId, r.id)) { _ => s.detail := None; Store.toast("回答を削除しました"); load(s, props) }
+  Toasts.report(Api.deleteResponse(props.formId, r.id)) { _ => s.detail := None; Toasts.show("回答を削除しました"); load(s, props) }
 }
 
 def forms(s: State) = s.form.mapC(_.toList)
@@ -112,7 +112,7 @@ def cell(r: ResponseDto, q: QuestionDto): String = Answers.of(r.answers, q)
               <tr v-for="r in s.rows" :key="r.id" class="clickable" @click="s.detail := Some(r)">
                 <td class="key">#{{ r.seq }}</td>
                 <td class="small nowrap">{{ Fmt.dateTime(r.createdAt) }}</td>
-                <td class="nowrap"><Avatar v-if="r.respondent.isDefined" :user="r.respondent" :size="20" /> {{ who(r) }}</td>
+                <td class="nowrap"><Avatar v-if="r.respondent.isDefined" :user="r.respondent.map(Fmt.person)" :size="20" /> {{ who(r) }}</td>
                 <td v-for="q in questions(s).v" class="cell">{{ cell(r, q) }}</td>
               </tr>
             </tbody>

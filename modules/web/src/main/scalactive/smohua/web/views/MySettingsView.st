@@ -6,7 +6,6 @@ import org.scalajs.dom
 import smohua.shared.*
 
 import scala.scalajs.concurrent.JSExecutionContext.Implicits.queue
-import scala.util.{Failure, Success}
 
 // 個人設定: 画面の色・通知（デスクトップ・プッシュ）・stui との連携・APIキー（MCP）
 case class State(keys: RV[List[ApiKeyDto]] = RV(Nil),
@@ -15,7 +14,7 @@ case class State(keys: RV[List[ApiKeyDto]] = RV(Nil),
                  desktop: RV[Boolean] = RV(Prefs.get("desktop", "on") == "on"),
                  days: RV[String] = RV("90"),
                  created: RV[Option[String]] = RV(None),
-                 error: RV[String] = RV(""),
+                 create: ActionState = useAction(),
                  links: RV[List[LinkServiceDto]] = RV(Nil))
 
 def initState() = State()
@@ -25,14 +24,14 @@ def mounted(s: State): Unit = {
   loadKeys(s)
   loadLinks(s)
   // 連携の許可画面から戻ったとき（?integration=stui&result=connected）
-  val q = new dom.URL(dom.window.location.href).searchParams
-  Option(q.get("integration")).foreach { p =>
+  val q = Router.query.v
+  q.get("integration").foreach { p =>
     q.get("result") match {
-      case "connected" => Store.toast(s"${AppNames.nameOf(p)} と連携しました")
-      case "denied"    => Store.toast(s"${AppNames.nameOf(p)} との連携は許可されませんでした", error = true)
-      case _           => Store.toast(s"${AppNames.nameOf(p)} と連携できませんでした。もう一度お試しください", error = true)
+      case Some("connected") => Toasts.show(s"${AppNames.nameOf(p)} と連携しました")
+      case Some("denied")    => Toasts.show(s"${AppNames.nameOf(p)} との連携は許可されませんでした", error = true)
+      case _                 => Toasts.show(s"${AppNames.nameOf(p)} と連携できませんでした。もう一度お試しください", error = true)
     }
-    dom.window.history.replaceState(null, "", "/settings")
+    Router.setQuery("integration" -> None, "result" -> None)
   }
 }
 
@@ -42,7 +41,7 @@ def connect(p: String): Unit =
   dom.window.location.href = s"/api/integrations/$p/connect?returnTo=" + Api.enc(dom.window.location.origin + "/settings")
 
 def disconnect(s: State, l: LinkServiceDto): Unit = Dialog.confirm(s"${l.name} との連携をやめますか？（回答が届いたときの知らせが ${l.name} に出なくなります）", "やめる") {
-  Store.report(Api.delete(s"/api/integrations/${l.provider}/connection")) { _ => Store.toast(s"${l.name} との連携をやめました"); loadLinks(s) }
+  Toasts.report(Api.delete(s"/api/integrations/${l.provider}/connection")) { _ => Toasts.show(s"${l.name} との連携をやめました"); loadLinks(s) }
 }
 
 def setDesktop(s: State, on: Boolean): Unit = {
@@ -51,23 +50,20 @@ def setDesktop(s: State, on: Boolean): Unit = {
   if (on) Store.askDesktopPermission()
 }
 
-def meBrief = Store.me.mapC(_.map(m => UserBrief(m.id, m.name, m.avatarUrl)))
+def meBrief = Store.me.mapC(_.map(m => Person(m.id.toString, m.name, m.avatarUrl)))
 def myName = Store.me.mapC(_.map(_.name).getOrElse(""))
 def myEmail = Store.me.mapC(_.flatMap(_.email).getOrElse(""))
 
 def loadKeys(s: State): Unit = Api.get[List[ApiKeyDto]]("/api/me/api-keys").foreach(s.keys := _)
 
-def createKey(s: State): Unit = {
-  s.error := ""
-  Api.post[CreatedApiKeyDto]("/api/me/api-keys", CreateApiKeyReq(s.keyName.v, s.scopes.v, s.days.v.toIntOption).asJson).onComplete {
-    case Success(r) => s.created := Some(r.key); s.keyName := ""; loadKeys(s)
-    case Failure(e) => s.error := e.getMessage
+def createKey(s: State): Unit =
+  s.create.run(Api.post[CreatedApiKeyDto]("/api/me/api-keys", CreateApiKeyReq(s.keyName.v, s.scopes.v, s.days.v.toIntOption).asJson)).foreach { r =>
+    s.created := Some(r.key); s.keyName := ""; loadKeys(s)
   }
-}
 
 def revoke(s: State, k: ApiKeyDto): Unit =
   Dialog.confirm(s"APIキー「${k.name}」を失効させますか？使っているプログラム・AI は使えなくなります。") {
-    Store.report(Api.delete(s"/api/me/api-keys/${k.id}"))(_ => loadKeys(s))
+    Toasts.report(Api.delete(s"/api/me/api-keys/${k.id}"))(_ => loadKeys(s))
   }
 
 
@@ -134,7 +130,7 @@ def via(k: ApiKeyDto): String = k.client.fold("")(c => s"（$c 連携）")
           <label class="small"><input type="checkbox" value="write" v-model="s.scopes"> 作成・更新・削除（write）</label>
           <label v-if="Store.isAdmin" class="small"><input type="checkbox" value="admin" v-model="s.scopes"> 管理（admin）</label>
         </div>
-        <p v-if="s.error.mapC(_.nonEmpty)" class="error">{{ s.error }}</p>
+        <p v-if="s.create.failed" class="error">{{ s.create.errorMessage }}</p>
         <button type="submit" class="primary">発行</button>
       </form>
       <div v-if="s.created.mapC(_.isDefined)" class="created">

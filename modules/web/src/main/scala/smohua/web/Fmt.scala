@@ -10,7 +10,8 @@ object Fmt {
   // 日時の表示（2026/11/15 09:30・「3分前」）は sbirds-lib
   export sbirds.web.Dates.{ago, dateTime}
 
-  def initials(name: String): String = name.trim.take(1)
+  /** アイコン（parts/Avatar）に出す人. */
+  def person(u: UserBrief): Person = Person(u.id.toString, u.name, u.avatarUrl)
 
   private def pad(n: Int): String = if (n < 10) s"0$n" else n.toString
 

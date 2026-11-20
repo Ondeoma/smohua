@@ -5,12 +5,8 @@ import org.scalajs.dom
 import smohua.shared.*
 
 import java.util.UUID
-import scala.concurrent.Future
 import scala.scalajs.concurrent.JSExecutionContext.Implicits.queue
 import scala.scalajs.js
-import scala.util.{Failure, Success}
-
-final case class Toast(id: Int, text: String, link: Option[String], error: Boolean)
 
 /** サーバーから届いた変更の知らせ（番号は届くたびに増える. 各画面はこれを監視して読み直す）. */
 final case class Change(seq: Int, formId: Option[UUID], kind: String)
@@ -25,10 +21,8 @@ object Store {
   val me: RV[Option[MeDto]] = RV(None)
   val config: RV[Option[ClientConfigDto]] = RV(None)
   val unread: RV[Int] = RV(0)
-  val toasts: RV[List[Toast]] = RV(Nil)
   val changes: RV[Change] = RV(Change(0, None, ""))
 
-  private var toastSeq = 0
   private var changeSeq = 0
 
   def myId: Option[UUID] = me.v.map(_.id)
@@ -36,32 +30,12 @@ object Store {
   /** システム管理者か. */
   def isAdmin = me.mapC(_.exists(_.isAdmin))
 
-  // ---------------------------------------------------------------- トースト
-
-  def toast(text: String, link: Option[String] = None, error: Boolean = false): Unit = {
-    toastSeq += 1
-    val t = Toast(toastSeq, text, link, error)
-    toasts := (toasts.v :+ t).takeRight(5)
-    dom.window.setTimeout(() => dismiss(t.id), if (error) 9000 else 6000)
-  }
-
-  def dismiss(id: Int): Unit = toasts := toasts.v.filterNot(_.id == id)
-
-  def error(e: Throwable): Unit = e match {
-    case ApiError(401, _) => ()
-    case other => toast(other.getMessage, error = true)
-  }
-
-  /** Future の失敗をトーストで知らせる. */
-  def report[A](f: Future[A])(ok: A => Unit): Unit = f.onComplete {
-    case Success(a) => ok(a)
-    case Failure(e) => error(e)
-  }
-
   // ---------------------------------------------------------------- 自動同期（SSE）
 
   private var stream: Option[dom.EventSource] = None
   private var lastSync = 0.0
+  // 画面が隠れている間に流さなかった知らせがあるか（見えるようになったとき、まとめて読み直す）
+  private var missed = false
 
   private def live: Boolean = stream.exists(_.readyState == dom.EventSource.OPEN)
 
@@ -84,7 +58,7 @@ object Store {
       if (dom.document.visibilityState.toString == "visible") {
         changeSeq += 1
         changes := Change(changeSeq, f, k)
-      }
+      } else missed = true
   }
 
   /** 未読の通知の数を読み直す（増えていて、画面が隠れていればデスクトップにも出す）. */
@@ -96,6 +70,7 @@ object Store {
   /** まとめて読み直す（つなぎ直したとき・SSE がつながらないとき）. */
   def sync(): Unit = if (me.v.isDefined) {
     lastSync = js.Date.now()
+    missed = false
     refreshUnread()
     emit(None, "sync")
   }
@@ -115,21 +90,17 @@ object Store {
     stream = Some(es)
   }
 
+  /**
+   * 画面が見えている間だけ、10秒ごとに確かめる（隠れている間は止め、見えるようになったときはすぐ確かめる）.
+   * SSE でつながっている間は、念のため60秒ごとにだけ読み直す.
+   */
   def startSync(): Unit = {
-    // SSE でつながっている間は、念のため60秒ごとにだけ読み直す
-    dom.window.setInterval(
-      () =>
-        if (dom.document.visibilityState.toString == "visible") {
-          // サーバーに断られて（429 など）ブラウザがつなぎ直すのをやめた SSE は、作り直す
-          if (stream.exists(_.readyState == dom.EventSource.CLOSED)) { stream = None; connect() }
-          if (!live || js.Date.now() - lastSync > 60000) sync()
-        },
-      10000
-    )
-    dom.document.addEventListener(
-      "visibilitychange",
-      (_: dom.Event) => if (dom.document.visibilityState.toString == "visible") sync()
-    )
+    useVisiblePolling(10000) {
+      // サーバーに断られて（429 など）ブラウザがつなぎ直すのをやめた SSE は、作り直す
+      if (stream.exists(_.readyState == dom.EventSource.CLOSED)) { stream = None; connect() }
+      if (missed || !live || js.Date.now() - lastSync > 60000) sync()
+    }
+    ()
   }
 
   /** 画面が隠れているときに、新しい通知をデスクトップに出す（許可されていれば）. */
@@ -162,15 +133,6 @@ object Store {
   }
 
 }
-
-/** 画面内のダイアログ（ブラウザ標準の confirm・prompt・alert の代わり）. 表示は parts/DialogHost.st. */
-final case class DialogReq(message: String,
-                           okLabel: String,
-                           danger: Boolean,
-                           input: Option[RV[String]],
-                           cancel: Boolean,
-                           onOk: String => Unit,
-                           onCancel: () => Unit)
 
 /** この端末だけの表示の設定（localStorage. 使えないときは既定値）. */
 object Prefs extends sbirds.web.LocalPrefs("smohua")

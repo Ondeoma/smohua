@@ -5,11 +5,14 @@ import smohua.shared.*
 import scala.scalajs.concurrent.JSExecutionContext.Implicits.queue
 
 // 通知（回答が届いた知らせ）. 押すと、そのフォームの回答を開く.
-case class State(unread: RV[Boolean] = RV(false), list: RV[NotificationListDto] = RV(NotificationListDto(Nil, 0)), loading: RV[Boolean] = RV(true))
+case class State(unread: RV[Boolean], list: AsyncState[NotificationListDto])
 
-def initState() = State()
+def initState() = {
+  val unread = RV(false)
+  State(unread, useAsync(Api.notifications(unread.v), immediate = false))
+}
 
-def load(s: State): Unit = Api.notifications(s.unread.v).foreach { l => s.list := l; s.loading := false }
+def load(s: State): Unit = { s.list.reload(); () }
 
 def mounted(s: State): Unit = {
   pageTitle("通知")
@@ -23,10 +26,10 @@ def open(n: NotificationDto): Unit = {
   Router.go(n.link)
 }
 
-def readAll(s: State): Unit = Store.report(Api.markRead(Nil)) { _ => load(s); Store.refreshUnread() }
+def readAll(s: State): Unit = Toasts.report(Api.markRead(Nil)) { _ => load(s); Store.refreshUnread() }
 
-def items(s: State) = s.list.mapC(_.items)
-def empty(s: State) = computed { s.list.v.items.isEmpty && !s.loading.v }
+def items(s: State) = s.list.data.mapC(_.map(_.items).getOrElse(Nil))
+def empty(s: State) = s.list.data.mapC(_.exists(_.items.isEmpty))
 </script>
 
 <template>

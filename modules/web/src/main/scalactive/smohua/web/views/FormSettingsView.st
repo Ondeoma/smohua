@@ -14,12 +14,12 @@ case class Props(formId: UUID)
 case class State(form: RV[Option[FormDto]] = RV(None), access: RV[String] = RV(FormAccess.Login), once: RV[Boolean] = RV(false),
                  confirmation: RV[String] = RV(""), inApp: RV[Boolean] = RV(true), mail: RV[Boolean] = RV(false), stui: RV[Boolean] = RV(false),
                  stuiChannel: RV[String] = RV(""), editors: RV[List[UserBrief]] = RV(Nil), userQ: RV[String] = RV(""),
-                 found: RV[List[UserBrief]] = RV(Nil), stuiLinked: RV[Boolean] = RV(false),
+                 found: RV[List[UserBrief]] = RV(Nil), stuiLinked: RV[Boolean] = RV(false), latest: LatestFn = useLatest(),
                  from: RV[String] = RV(""), until: RV[String] = RV(""),
                  bg: RV[String] = RV(""), card: RV[String] = RV(""), text: RV[String] = RV(""), accent: RV[String] = RV(""),
                  submitLabel: RV[String] = RV(""), showTitle: RV[Boolean] = RV(true), showDesc: RV[Boolean] = RV(true),
                  showBrand: RV[Boolean] = RV(true), showAnon: RV[Boolean] = RV(true), css: RV[String] = RV(""), embedH: RV[String] = RV("800"),
-                 saved: RV[String] = RV(""), unguard: RV[Option[() => Unit]] = RV(None))
+                 saved: RV[String] = RV(""))
 
 def initState() = State()
 
@@ -39,13 +39,11 @@ def show(s: State, f: FormDto): Unit = {
 def dirty(s: State): Boolean = s.form.v.exists(_.canEdit) && request(s).toString != s.saved.v
 
 def mounted(s: State, props: Props): Unit = {
-  Store.report(Api.form(props.formId))(show(s, _))
+  Toasts.report(Api.form(props.formId))(show(s, _))
   Api.links().foreach(ls => s.stuiLinked := ls.exists(l => l.provider == "stui" && l.connected))
   // 保存せずにほかの画面へ移る・ページを閉じるときは確かめる
-  s.unguard := Some(LeaveGuard.install(() => dirty(s)))
+  LeaveGuard.install(() => dirty(s))
 }
-
-def unmounted(s: State): Unit = { s.unguard.v.foreach(_()); s.unguard := None }
 
 /** 保存する内容（変更があるかの比べ合わせにも使う）. */
 def request(s: State): UpdateFormReq =
@@ -57,13 +55,13 @@ def request(s: State): UpdateFormReq =
       s.showAnon.v, s.css.v)))
 
 def save(s: State, props: Props): Unit =
-  Store.report(Api.updateForm(props.formId, request(s))) { f => show(s, f); Store.toast("保存しました") }
+  Toasts.report(Api.updateForm(props.formId, request(s))) { f => show(s, f); Toasts.show("保存しました") }
 
 def search(s: State): Unit = {
   val q = s.userQ.v.trim
-  if (q.isEmpty) s.found := Nil
-  // 打つたびに探すので、届いた順が前後しても、いまの入力に対する結果だけを出す
-  else Api.users(q, 8).foreach(us => if (s.userQ.v.trim == q)
+  // 打つたびに探すので、届いた順が前後しても、最後の入力に対する結果だけを出す
+  if (q.isEmpty) { s.latest.cancel(); s.found := Nil }
+  else s.latest(Api.users(q, 8)).foreach(us =>
     s.found := us.filterNot(u => s.editors.v.exists(_.id == u.id) || s.form.v.exists(_.owner.id == u.id)))
 }
 
@@ -71,13 +69,13 @@ def addEditor(s: State, u: UserBrief): Unit = { s.editors := s.editors.v :+ u; s
 def removeEditor(s: State, u: UserBrief): Unit = s.editors := s.editors.v.filterNot(_.id == u.id)
 
 def duplicate(props: Props): Unit =
-  Store.report(Api.duplicateForm(props.formId)) { f => Store.toast("フォームを複製しました（下書き）"); Router.go(Paths.form(f.id)) }
+  Toasts.report(Api.duplicateForm(props.formId)) { f => Toasts.show("フォームを複製しました（下書き）"); Router.go(Paths.form(f.id)) }
 
 def remove(s: State, props: Props): Unit =
   Dialog.confirm(s"フォーム「${s.form.v.map(_.title).getOrElse("")}」と、集めた回答をすべて削除しますか？", "削除する") {
-    Store.report(Api.deleteForm(props.formId)) { _ =>
-      Store.toast("フォームを削除しました")
-      s.unguard.v.foreach(_()); s.unguard := None // 消したフォームの変更は確かめない
+    Toasts.report(Api.deleteForm(props.formId)) { _ =>
+      Toasts.show("フォームを削除しました")
+      s.saved := request(s).toString // 消したフォームの変更は確かめない
       Router.go("/")
     }
   }
@@ -168,15 +166,15 @@ def needLink(s: State) = computed { s.stui.v && !s.stuiLinked.v }
       <section class="panel">
         <h2>編集できる人</h2>
         <p class="muted small">質問と設定を変えられ、回答を見られる人です。</p>
-        <div v-for="f in forms(s)" class="row person"><Avatar :user="Some(f.owner)" :size="24" /><span class="grow">{{ f.owner.name }}</span><span class="badge">持ち主</span></div>
+        <div v-for="f in forms(s)" class="row person"><Avatar :user="Some(Fmt.person(f.owner))" :size="24" /><span class="grow">{{ f.owner.name }}</span><span class="badge">持ち主</span></div>
         <div v-for="u in s.editors" :key="u.id" class="row person">
-          <Avatar :user="Some(u)" :size="24" /><span class="grow">{{ u.name }}</span>
+          <Avatar :user="Some(Fmt.person(u))" :size="24" /><span class="grow">{{ u.name }}</span>
           <button v-if="owner(s)" class="small ghost" @click="removeEditor(s, u)">外す</button>
         </div>
         <div v-if="owner(s)" class="add">
           <input type="search" v-model="s.userQ" placeholder="名前・メールで探して追加" @input="search(s)">
           <div v-if="s.found.mapC(_.nonEmpty)" class="found">
-            <a v-for="u in s.found" :key="u.id" href="#" class="row" @click.prevent="addEditor(s, u)"><Avatar :user="Some(u)" :size="22" /> {{ u.name }}</a>
+            <a v-for="u in s.found" :key="u.id" href="#" class="row" @click.prevent="addEditor(s, u)"><Avatar :user="Some(Fmt.person(u))" :size="22" /> {{ u.name }}</a>
           </div>
         </div>
       </section>

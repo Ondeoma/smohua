@@ -9,8 +9,8 @@ case class Props(form: FormDto, tab: String, onChanged: FormDto => Unit)
 def fillUrl(props: Props): String = dom.window.location.origin + Paths.fill(props.form.id)
 
 def setStatus(props: Props, status: String): Unit =
-  Store.report(Api.updateForm(props.form.id, UpdateFormReq(status = Some(status)))) { f =>
-    Store.toast(status match {
+  Toasts.report(Api.updateForm(props.form.id, UpdateFormReq(status = Some(status)))) { f =>
+    Toasts.show(status match {
       case FormStatus.Open   => "公開しました。回答用の URL を渡してください"
       case FormStatus.Closed => "回答を締め切りました"
       case _                 => "下書きに戻しました"

@@ -16,8 +16,8 @@ case class Field(q: QuestionDto, text: RV[String], multi: RV[List[String]])
 
 case class Props(formId: UUID)
 
-case class State(form: RV[Option[PublicFormDto]] = RV(None), fields: RV[List[Field]] = RV(Nil), error: RV[String] = RV(""),
-                 notFound: RV[Boolean] = RV(false), sending: RV[Boolean] = RV(false), done: RV[Option[String]] = RV(None))
+case class State(form: RV[Option[PublicFormDto]] = RV(None), fields: RV[List[Field]] = RV(Nil),
+                 notFound: RV[Boolean] = RV(false), send: ActionState = useAction(), done: RV[Option[String]] = RV(None))
 
 def initState() = State()
 
@@ -37,16 +37,10 @@ def value(f: Field): Option[Json] =
   if (f.q.kind == QuestionKind.Multi) Option.when(f.multi.v.nonEmpty)(f.multi.v.asJson)
   else Option(f.text.v.trim).filter(_.nonEmpty).map(_.asJson)
 
-def submit(s: State, props: Props): Unit = {
-  s.error := ""; s.sending := true
-  Api.submit(props.formId, s.fields.v.flatMap(f => value(f).map(f.q.id -> _)).toMap).onComplete { r =>
-    s.sending := false
-    r match {
-      case Success(d) => s.done := Some(d.confirmation); dom.window.scrollTo(0, 0)
-      case Failure(e) => s.error := e.getMessage
-    }
+def submit(s: State, props: Props): Unit =
+  s.send.run(Api.submit(props.formId, s.fields.v.flatMap(f => value(f).map(f.q.id -> _)).toMap)).foreach { d =>
+    s.done := Some(d.confirmation); dom.window.scrollTo(0, 0)
   }
-}
 
 def again(s: State, props: Props): Unit = { s.done := None; load(s, props) }
 
@@ -130,9 +124,9 @@ def showForm(s: State) = computed { s.done.v.isEmpty && s.form.v.isDefined }
               <label v-for="n in scale(x.q)"><input type="radio" :name="x.q.id" :value="n" v-model="x.text"><span>{{ n }}</span></label>
             </div>
           </section>
-          <p v-if="s.error.mapC(_.nonEmpty)" class="error errs">{{ s.error }}</p>
+          <p v-if="s.send.failed" class="error errs">{{ s.send.errorMessage }}</p>
           <div class="row">
-            <button type="submit" class="primary send" :disabled="s.sending">{{ submitLabel(f) }}</button>
+            <button type="submit" class="primary send" :disabled="s.send.busy">{{ submitLabel(f) }}</button>
             <span v-if="f.access == FormAccess.Anyone && f.appearance.showAnonymous" class="muted small">この回答は匿名で送られます</span>
           </div>
         </form>
