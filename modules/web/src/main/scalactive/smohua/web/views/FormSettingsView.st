@@ -8,12 +8,13 @@ import scala.scalajs.concurrent.JSExecutionContext.Implicits.queue
 
 import org.scalajs.dom
 
-// フォームの設定: だれが回答できるか・受付期間・回答の画面の見た目（埋め込み用）・回答した後の文・回答が届いたときの知らせ方・編集できる人・複製と削除
+// フォームの設定: だれが回答できるか・受付期間・回答の画面の見た目（埋め込み用）・回答した後の文・知らせ方（持ち主と編集できる人・回答した人・通知先）・編集できる人・複製と削除
 case class Props(formId: UUID)
 
 case class State(form: RV[Option[FormDto]] = RV(None), access: RV[String] = RV(FormAccess.Login), once: RV[Boolean] = RV(false),
                  confirmation: RV[String] = RV(""), inApp: RV[Boolean] = RV(true), mail: RV[Boolean] = RV(false), stui: RV[Boolean] = RV(false),
-                 stuiChannel: RV[String] = RV(""), editors: RV[List[UserBrief]] = RV(Nil), userQ: RV[String] = RV(""),
+                 stuiChannel: RV[String] = RV(""), statusEvents: RV[Boolean] = RV(false), receipt: RV[Boolean] = RV(false),
+                 editors: RV[List[UserBrief]] = RV(Nil), userQ: RV[String] = RV(""),
                  found: RV[List[UserBrief]] = RV(Nil), stuiLinked: RV[Boolean] = RV(false), latest: LatestFn = useLatest(),
                  from: RV[String] = RV(""), until: RV[String] = RV(""),
                  bg: RV[String] = RV(""), card: RV[String] = RV(""), text: RV[String] = RV(""), accent: RV[String] = RV(""),
@@ -26,6 +27,7 @@ def initState() = State()
 def show(s: State, f: FormDto): Unit = {
   s.form := Some(f); s.access := f.access; s.once := f.oneResponse; s.confirmation := f.confirmation
   s.inApp := f.notice.inApp; s.mail := f.notice.mail; s.stui := f.notice.stui; s.stuiChannel := f.notice.stuiChannel
+  s.statusEvents := f.notice.statusEvents; s.receipt := f.notice.receipt
   s.editors := f.editors
   s.from := f.schedule.from.map(Fmt.localInput).getOrElse(""); s.until := f.schedule.until.map(Fmt.localInput).getOrElse("")
   val a = f.appearance
@@ -48,7 +50,7 @@ def mounted(s: State, props: Props): Unit = {
 /** 保存する内容（変更があるかの比べ合わせにも使う）. */
 def request(s: State): UpdateFormReq =
   UpdateFormReq(access = Some(s.access.v), oneResponse = Some(s.once.v && s.access.v == FormAccess.Login),
-    confirmation = Some(s.confirmation.v), notice = Some(FormNotifyDto(s.inApp.v, s.mail.v, s.stui.v, s.stuiChannel.v)),
+    confirmation = Some(s.confirmation.v), notice = Some(FormNotifyDto(s.inApp.v, s.mail.v, s.stui.v, s.stuiChannel.v, s.statusEvents.v, s.receipt.v)),
     editorIds = Option.when(ownerOrAdmin(s))(s.editors.v.map(_.id)),
     schedule = Some(FormScheduleDto(Fmt.fromLocalInput(s.from.v), Fmt.fromLocalInput(s.until.v))),
     appearance = Some(FormAppearanceDto(s.bg.v, s.card.v, s.text.v, s.accent.v, s.submitLabel.v, s.showTitle.v, s.showDesc.v, s.showBrand.v,
@@ -96,6 +98,10 @@ def notOwner(s: State) = computed { !ownerOrAdmin(s) }
 def hasMail = Store.config.mapC(_.exists(_.mail))
 def hasStui = Store.config.mapC(_.exists(_.stui))
 def needLink(s: State) = computed { s.stui.v && !s.stuiLinked.v }
+/** 匿名のフォームで控えを送るには「メールアドレス」の質問が要る. */
+def receiptNoAddress(s: State) = computed {
+  s.receipt.v && s.access.v == FormAccess.Anyone && !s.form.v.exists(_.questions.exists(_.kind == QuestionKind.Email))
+}
 </script>
 
 <template>
@@ -150,8 +156,8 @@ def needLink(s: State) = computed { s.stui.v && !s.stuiLinked.v }
       </section>
 
       <section class="panel">
-        <h2>回答が届いたときの知らせ</h2>
-        <p class="muted small">持ち主と、編集できる人に知らせます。</p>
+        <h2>持ち主と編集できる人への知らせ</h2>
+        <p class="muted small">回答が届いたときに、持ち主と、編集できる人に知らせます。</p>
         <label class="check"><input type="checkbox" v-model="s.inApp"> {{ AppNames.self }} の通知（🔔）とプッシュ通知</label>
         <label v-if="hasMail" class="check"><input type="checkbox" v-model="s.mail"> メール</label>
         <label v-if="hasStui" class="check"><input type="checkbox" v-model="s.stui"> {{ AppNames.of("stui") }}（チャット）</label>
@@ -161,6 +167,12 @@ def needLink(s: State) = computed { s.stui.v && !s.stuiLinked.v }
           <p v-if="needLink(s)" class="small warn">{{ AppNames.of("stui") }} と連携していません。<a href="/settings" @click.prevent='Router.go("/settings")'>個人設定</a>の「{{ AppNames.of("stui") }} 連携」で連携すると届きます。</p>
           <p class="muted small">チャンネルへの投稿は、持ち主の {{ AppNames.of("stui") }} の連携を使います（持ち主がそのチャンネルに参加している必要があります）。チャンネルを変えられるのは、持ち主と管理者だけです。</p>
         </div>
+        <label class="check"><input type="checkbox" v-model="s.statusEvents"> 受付を始めたとき・締め切ったときも知らせる（受付期間の始まり・終わりを含む）</label>
+        <h3>回答した人への控え</h3>
+        <label v-if="hasMail" class="check"><input type="checkbox" v-model="s.receipt"> 回答した人に、回答の控えをメールで送る</label>
+        <p v-if="hasMail" class="muted small">ログインして回答した人はそのメールアドレスへ、匿名のフォームは「メールアドレス」の質問の答えへ送ります（同じアドレスへは1時間に5通まで）。</p>
+        <p v-if="receiptNoAddress(s)" class="small warn">このフォームには「メールアドレス」の質問がないため、控えを送る先がありません。</p>
+        <p v-if="hasMail.mapC(!_)" class="muted small">このサーバーではメールを送れません。</p>
       </section>
 
       <section class="panel">
@@ -180,6 +192,9 @@ def needLink(s: State) = computed { s.stui.v && !s.stuiLinked.v }
       </section>
 
       <div class="row bar"><span class="grow"></span><button class="primary" @click="save(s, props)">保存</button></div>
+
+      <!-- 通知先は、追加・編集のたびに保存する（上の「保存」とは別） -->
+      <FormTargets v-if="owner(s)" :formId="props.formId" />
 
       <section class="panel">
         <h2>複製・削除</h2>

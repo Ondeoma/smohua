@@ -6,8 +6,9 @@ smohua が兄弟のサービスとやり取りする向きと、それぞれの�
 |---|---|---|---|
 | sruru（IdP） | smohua → sruru | OIDC ログイン。名前・メール・グループ・アイコン（`picture`）を受け取る | `OIDC_*`・`ADMIN_GROUPS` |
 | skorimako | smohua → skorimako | ログ・トレース・メトリクス（OTLP）、ブラウザの観測（RUM） | `OTEL_EXPORTER_OTLP_*`・`SKORIMAKO_RUM_*` |
-| skereru（メール） | smohua → skereru | 回答が届いた知らせをメールで送る（SMTP） | `SMTP_*`・`MAIL_FROM` |
-| stui（チャット） | smohua → stui | 回答が届いた知らせを DM・チャンネルに送る（OAuth + `POST /api/apps/notify`） | `STUI_*` |
+| skereru（メール） | smohua → skereru | 回答・受付の開始と締め切りの知らせ、回答の控えをメールで送る（SMTP） | `SMTP_*`・`MAIL_FROM` |
+| stui（チャット） | smohua → stui | 知らせを DM・チャンネルに送る（OAuth + `POST /api/apps/notify`、またはチャンネルの受信 Webhook） | `STUI_*` |
+| ほかのシステム | smohua → 任意の URL | 知らせを署名付きの JSON で送る（フォームの通知先の Webhook） | `NOTIFY_ALLOW_INTERNAL` |
 | skiwi（Wiki） | skiwi → smohua | ページの中のブロックに、フォームの回答を表示する（OAuth + 読み取りの API） | `OAUTH_CLIENTS` |
 
 ## 1. sruru（OIDC とアイコン）
@@ -40,7 +41,11 @@ skereru はメールサーバー（SMTP・IMAP・Web メール）で、通知用
 - skereru に送信用のメールボックス（例: `smohua@example.com`）を作り、そのアプリパスワードを `SMTP_USER`・`SMTP_PASSWORD` に、同じアドレスを `MAIL_FROM` に設定する
   （`SMTP_HOST` は skereru、`SMTP_PORT=587`、`SMTP_TLS=starttls`）。
 - フォームの「設定」→「回答が届いたときの知らせ」→「メール」を選ぶと、持ち主と編集できる人のメールアドレス（IdP から受け取ったもの）に送る。
-- 送信は `notify_outbox` に積んで、裏のワーカーが送る（失敗は間を空けて5回まで）。
+- 「受付を始めたとき・締め切ったときも知らせる」を選ぶと、受付の開始・締め切り（受付期間の始まり・終わりを含む）も同じ宛先に送る。
+- **回答の控え**: 「回答した人に、回答の控えをメールで送る」を選ぶと、ログインして回答した人は IdP のアドレスへ、匿名のフォームは「メールアドレス」の質問の答えへ、
+  すべての質問と答えを送る。知らない人へ送り付けるのに使われないよう、同じアドレスへは1時間に5通まで。
+- **決まったアドレス**: フォームの通知先（6.）に「メールアドレス」を足すと、smohua を使っていない人（問い合わせの窓口など）にも送れる。
+- 送信は `notify_outbox`（通知先は `form_delivery`）に積んで、裏のワーカーが送る（失敗は間を空けて5回〈通知先は8回〉まで）。
 
 ## 4. stui（チャット）
 
@@ -59,6 +64,9 @@ skereru はメールサーバー（SMTP・IMAP・Web メール）で、通知用
    - チャンネルを空にすると、連携している人それぞれに、ボット（smohua）からの DM で届く（`POST /api/apps/notify {title, text, url}`）。
    - チャンネルを書くと、持ち主の連携で、そのチャンネルに1回だけ投稿する（`{…, channel}`。持ち主がそのチャンネルに参加している必要がある）。
 - stui が 401 を返したら（stui 側で失効）、その人の連携を外す。4xx は送り直さない。5xx・通信の失敗は間を空けて送り直す。
+- 連携の手続き（認可コード + PKCE・トークンの交換と失効）と通知の送信は、兄弟と共通の `sbirds.links.LinkClient`・`StuiClient`（sbirds-lib）を使う。
+- **連携しない使い方**: stui のチャンネルの設定の「連携」で受信 Webhook を作り、その URL をフォームの通知先（6.）の「チャットの受信 Webhook」に登録する。
+  smohua の名前で、そのチャンネルに投稿する（Slack・Mattermost の受信 Webhook も同じ形）。
 
 ## 5. skiwi（ページの中のブロック）
 
@@ -74,3 +82,55 @@ skiwi 側の取り決めは skiwi の `docs/smohua-integration.md`。smohua が 
   - `POST /api/forms/lookup {"ids":[…]}` → `{"forms":[{"id","title","status","questions","responses","lastResponseAt","url"}]}`
   - `GET /api/forms/{ID}/summary` → 質問ごとの集計
   - `GET /api/forms/{ID}/responses?limit=50` → 回答の一覧
+
+## 6. フォームの通知先（受信 Webhook・Webhook・メールアドレス）
+
+フォームの「設定」→「通知先」で、持ち主と管理者が登録する（回答の中身がフォームの外へ出るため、編集できる人は見られない）。1つのフォームに20件まで。
+通知先ごとに、知らせるきっかけ（`response.created` 回答が届いた・`form.opened` 受付を始めた・`form.closed` 締め切った）を選ぶ。
+
+| 種類 | 送るもの |
+|---|---|
+| チャットの受信 Webhook（`chat_hook`） | `{"text": "**[見出し](URL)**\n\n要約", "username": "smohua"}`。回答の文は Markdown の記号を無害にしてから載せる |
+| Webhook（`webhook`） | イベントの JSON（下）。HMAC-SHA256 の署名付き |
+| メールアドレス（`mail`） | 見出し・要約・リンクのメール |
+
+- 送り先の URL は、登録のときと送るたびに確かめ、内部のアドレス（ループバック・プライベートなど）には送らない（`sbirds.net.NetGuard`。リダイレクトはたどらない）。
+  内部の相手に送るときは `NOTIFY_ALLOW_INTERNAL` で許す。stui のホストは自動で許す。
+- 送れなかった理由は通知先の一覧に出す。「試す」で、送信待ちを通さずにその場で送れる（イベント `test`）。
+- 受付の開始・締め切りは、状態を変えたときと、受付期間の始まり・終わり（全ノードが30秒ごとに見比べる）に送る。
+
+### Webhook の中身
+
+ヘッダー:
+
+- `X-Smohua-Event`: イベントの名前
+- `X-Smohua-Delivery`: 送信の ID（送り直しても同じ。受け手は重複を捨てるのに使う）
+- `X-Smohua-Signature`: `sha256=` + hex(HMAC-SHA256(署名の鍵, 本文))。署名の鍵は通知先の編集の画面に出る
+
+本文（`response.created`）:
+
+```json
+{
+  "event": "response.created",
+  "deliveryId": "…",
+  "form": {"id": "…", "title": "申し込み", "url": "https://smohua.example.com/f/…", "responsesUrl": "https://smohua.example.com/forms/…/responses"},
+  "response": {
+    "id": "…", "seq": 12, "createdAt": "2026-11-21T01:23:45Z",
+    "respondent": {"name": "山田", "email": "yamada@example.com"},
+    "url": "https://smohua.example.com/forms/…/responses",
+    "answers": [{"questionId": "name", "label": "お名前", "kind": "short", "value": "山田", "text": "山田"}]
+  }
+}
+```
+
+`respondent` は、ログインした人だけが答えるフォームのときだけ（匿名のフォームは `null`）。`value` は質問の種類のままの値（複数選ぶ質問は配列、数は数）、`text` は文にしたもの。
+
+本文（`form.opened`・`form.closed`）: `{"event", "deliveryId", "form", "at", "responseCount"}`
+
+署名の確かめ方（例: Python）:
+
+```python
+import hmac, hashlib
+ok = hmac.compare_digest(request.headers["X-Smohua-Signature"],
+                         "sha256=" + hmac.new(secret.encode(), request.body, hashlib.sha256).hexdigest())
+```

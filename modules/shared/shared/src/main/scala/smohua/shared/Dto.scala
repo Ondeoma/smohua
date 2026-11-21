@@ -121,7 +121,8 @@ object QuestionKind {
   val Scale = "scale" // 段階（1〜5 など）
   val Date = "date" // 日付
   val Number = "number" // 数
-  val all: List[String] = List(Short, Long, Single, Multi, Dropdown, Scale, Date, Number)
+  val Email = "email" // メールアドレス（回答の控えの宛先にもなる）
+  val all: List[String] = List(Short, Long, Single, Multi, Dropdown, Scale, Date, Number, Email)
 
   /** 選択肢から選ぶ種類か. */
   def hasOptions(k: String): Boolean = k == Single || k == Multi || k == Dropdown
@@ -137,6 +138,7 @@ object QuestionKind {
     case Scale => "段階で選ぶ"
     case Date => "日付"
     case Number => "数"
+    case Email => "メールアドレス"
     case _ => k
   }
 }
@@ -175,11 +177,15 @@ object QuestionDto {
 /**
  * 回答が届いたときの知らせ方（フォームの持ち主と編集できる人へ）. inApp は画面内とプッシュ通知、mail はメール（SMTP. skereru など）、
  * stui は stui（本人が連携しているとき. stuiChannel があればそのチャンネルへ、なければボットからの DM）.
+ * statusEvents は、受付の開始・締め切りも同じ方法で知らせるか. receipt は、回答した人に回答の控えをメールで送るか
+ * （ログインして回答した人はそのアドレス、匿名のフォームは「メールアドレス」の質問の答え）.
  */
 final case class FormNotifyDto(inApp: Boolean = true,
                                mail: Boolean = false,
                                stui: Boolean = false,
-                               stuiChannel: String = "")
+                               stuiChannel: String = "",
+                               statusEvents: Boolean = false,
+                               receipt: Boolean = false)
   derives Encoder.AsObject
 
 object FormNotifyDto {
@@ -190,10 +196,65 @@ object FormNotifyDto {
       c.get[Boolean]("inApp").getOrElse(true),
       c.get[Boolean]("mail").getOrElse(false),
       c.get[Boolean]("stui").getOrElse(false),
-      c.get[String]("stuiChannel").getOrElse("")
+      c.get[String]("stuiChannel").getOrElse(""),
+      c.get[Boolean]("statusEvents").getOrElse(false),
+      c.get[Boolean]("receipt").getOrElse(false)
     ))
   )
 }
+
+/** 通知するきっかけ. */
+object FormEvent {
+  val ResponseCreated = "response.created" // 回答が届いた
+  val Opened = "form.opened" // 受付を始めた（受付期間の始まりを含む）
+  val Closed = "form.closed" // 締め切った（受付期間の終わりを含む）
+  val all: List[String] = List(ResponseCreated, Opened, Closed)
+  def label(e: String): String = e match {
+    case ResponseCreated => "回答が届いた"
+    case Opened => "受付を始めた"
+    case Closed => "締め切った"
+    case _ => e
+  }
+}
+
+/**
+ * フォームの通知先の種類. chat_hook は stui・Slack・Mattermost の受信 Webhook（{"text"} を投稿する. URL が鍵）、
+ * webhook は署名付きの JSON（X-Smohua-Signature）、mail は決まったメールアドレス.
+ */
+object TargetKind {
+  val ChatHook = "chat_hook"
+  val Webhook = "webhook"
+  val Mail = "mail"
+  val all: List[String] = List(ChatHook, Webhook, Mail)
+  def label(k: String): String = k match {
+    case ChatHook => "チャットの受信 Webhook（stui・Slack・Mattermost）"
+    case Webhook => "Webhook（署名付きの JSON）"
+    case Mail => "メールアドレス"
+    case _ => k
+  }
+}
+
+/** フォームの通知先（持ち主と管理者だけが見られる. secret は webhook の署名の鍵）. lastError は直近の送信の失敗の理由. */
+final case class FormTargetDto(id: UUID,
+                               name: String,
+                               kind: String,
+                               url: Option[String],
+                               address: Option[String],
+                               secret: Option[String],
+                               events: List[String],
+                               enabled: Boolean,
+                               lastError: Option[String],
+                               createdAt: Timestamp)
+  derives Encoder.AsObject, Decoder
+
+/** 通知先を作る・変える（種類は作った後は変えられない）. */
+final case class FormTargetReq(name: String,
+                               kind: String,
+                               url: Option[String] = None,
+                               address: Option[String] = None,
+                               events: List[String] = List(FormEvent.ResponseCreated),
+                               enabled: Boolean = true)
+  derives Encoder.AsObject, Decoder
 
 /** 受付期間. from より前は「受付前」、until 以降は「受付終了」（状態が「受付中」のときだけ効く）. どちらも省略できる. */
 final case class FormScheduleDto(from: Option[Timestamp] = None, until: Option[Timestamp] = None)

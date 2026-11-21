@@ -211,7 +211,7 @@ class StoreSpec extends DbSuite {
       // 送信待ち: 自分の分だけを数える（ほかのテストの行が混ざっても壊れないように）
       _ <- forms.enqueue(a.id, "stui", Json.obj("title" -> "t".asJson))
       seen <- Ref.of[IO, Int](0)
-      mine = (r: OutboxRow) => r.userId == a.id
+      mine = (r: OutboxRow) => r.userId.contains(a.id)
       _ <- forms.processOutbox(100)(r =>
         if mine(r) then seen.update(_ + 1).as(OutboxResult.Retry("一時的な失敗")) else IO.pure(OutboxResult.Skip("test"))
       )

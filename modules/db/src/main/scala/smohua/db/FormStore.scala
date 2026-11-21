@@ -53,9 +53,10 @@ final case class FormRow(id: UUID,
 
 final case class ResponseRow(id: UUID, seq: Long, formId: UUID, userId: Option[UUID], answers: Json, createdAt: Instant)
 
-/** 兄弟のサービスへ送る通知（送信待ち）。 */
+/** 兄弟のサービスへ送る通知（送信待ち）。宛先はユーザー（userId）か、メールアドレス（address。回答の控え）。 */
 final case class OutboxRow(id: UUID,
-                           userId: UUID,
+                           userId: Option[UUID],
+                           address: Option[String],
                            provider: String,
                            payload: Json,
                            attempts: Int
@@ -177,6 +178,19 @@ final class FormStore(xa: Transactor[IO]) extends TxStore(xa) {
       _ <- if n > 0 then event(id, "form.updated") else ().pure[ConnectionIO]
       f <- findC(id)
     } yield f
+  }
+
+  /**
+   * いま回答を受け付けているか（状態が受付中で、受付期間の中）を見比べ、前と変わったフォームの行と新しい値を返す（受付の開始・締め切りの知らせ）。
+   * 前の値は form.accepting に置くので、複数のノードが同時に見ても、変わったことを知るのは1つだけ。id を渡せばそのフォームだけを見る。
+   */
+  def syncAccepting(id: Option[UUID]): IO[List[(FormRow, Boolean)]] = tx {
+    val now =
+      fr"(f.status = 'open' and (f.open_from is null or f.open_from <= now()) and (f.open_until is null or now() < f.open_until))"
+    (fr"update form f set accepting =" ++ now ++
+      fr"where f.deleted_at is null and f.accepting is distinct from" ++ now ++
+      id.fold(Fragment.empty)(i => fr"and f.id = $i") ++
+      fr"returning" ++ formCols ++ fr", f.accepting").query[(FormRow, Boolean)].to[List]
   }
 
   def delete(id: UUID): IO[Boolean] = tx(
@@ -345,10 +359,27 @@ final class FormStore(xa: Transactor[IO]) extends TxStore(xa) {
     sql"insert into notify_outbox (id, user_id, provider, payload) values (${UUID.randomUUID()}, $userId, $provider, $payload)".update.run.void
   )
 
+  /**
+   * ユーザーでない宛先（メールアドレス）へのメールを積む。同じアドレスへ1時間に perHour 通を超えるなら積まない（false）
+   * （匿名のフォームから、知らない人へメールを送り付けるのに使われないように）。
+   */
+  def enqueueMail(address: String, payload: Json, perHour: Int): IO[Boolean] = tx(
+    sql"select pg_advisory_xact_lock(hashtext(${"mail:" + address.toLowerCase}))".query[Unit].unique *>
+      sql"""select count(*) from notify_outbox
+            where lower(address) = ${address.toLowerCase} and created_at > now() - interval '1 hour'""".query[
+        Int
+      ].unique.flatMap(n =>
+        if n >= perHour then false.pure[ConnectionIO]
+        else
+          sql"""insert into notify_outbox (id, address, provider, payload)
+                values (${UUID.randomUUID()}, $address, 'mail', $payload)""".update.run.as(true)
+      )
+  )
+
   /** 送る分を取り出し（SKIP LOCKED で複数ノードの重複を防ぐ）、send の結果を記録する。5回失敗したらあきらめる。 */
   def processOutbox(batch: Int)(send: OutboxRow => IO[OutboxResult]): IO[Int] =
     processEach(
-      sql"""select id, user_id, provider, payload, attempts from notify_outbox
+      sql"""select id, user_id, address, provider, payload, attempts from notify_outbox
             where sent_at is null and not skipped and not_before <= now() order by not_before limit $batch for update skip locked""".query[
         OutboxRow
       ].to[List]

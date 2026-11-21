@@ -16,6 +16,9 @@ object Config {
   private def commaList(name: String): List[String] =
     opt(name).toList.flatMap(_.split(',').map(_.trim).filter(_.nonEmpty))
 
+  private def hostOf(url: String): Option[String] =
+    scala.util.Try(java.net.URI.create(url).getHost).toOption.flatMap(Option(_)).map(_.toLowerCase)
+
   def load: IO[AppConfig] = IO.fromEither(
     (for {
       dbUrl <- required("DATABASE_URL")
@@ -49,6 +52,12 @@ object Config {
         "OAUTH_CLIENTS の各要素には id・secret（16文字以上）・redirectUri（https://。開発中は http://localhost:…/ も可）を指定してください"
       ))
       rate <- RateLimitConfig.fromEnv()
+      // stui との連携（STUI_URL・STUI_CLIENT_ID・STUI_CLIENT_SECRET。サーバーから呼ぶ URL は STUI_INTERNAL_URL）。stui に smohua をクライアントとして登録しておく
+      stui <- sbirds.links.LinkConfig.fromEnv("STUI", "stui", "read write")
+      // フォームの通知先（受信 Webhook・Webhook）へは、外のアドレスだけに送る。内部の相手は許可リストで許す（stui は自動で足す）
+      notifyPolicy <- sbirds.net.NetGuard.Policy.allowList(
+        list("NOTIFY_ALLOW_INTERNAL") ++ List("STUI_URL", "STUI_INTERNAL_URL").flatMap(opt).flatMap(hostOf)
+      ).left.map(e => s"NOTIFY_ALLOW_INTERNAL: $e")
       tz <- opt("TIMEZONE").getOrElse("Asia/Tokyo") match {
         case z if scala.util.Try(java.time.ZoneId.of(z)).isSuccess => Right(z)
         case z => Left(s"TIMEZONE が正しくありません: $z（例: Asia/Tokyo）")
@@ -66,16 +75,7 @@ object Config {
           devLogin = devLogin,
           timezone = tz,
           oauthClients = clients,
-          // STUI_URL・STUI_CLIENT_ID・STUI_CLIENT_SECRET（STUI_INTERNAL_URL はサーバーから呼ぶ URL）。stui に smohua をクライアントとして登録しておく
-          stui = (opt("STUI_URL"), opt("STUI_CLIENT_ID"), opt("STUI_CLIENT_SECRET")).mapN((u, id, sec) =>
-            smohua.api.LinkService(
-              "stui",
-              u.stripSuffix("/"),
-              id,
-              sec,
-              opt("STUI_INTERNAL_URL").map(_.stripSuffix("/"))
-            )
-          ),
+          stui = stui,
           mail = opt("SMTP_HOST").isDefined,
           // ログインしなくても使える入口の、IP ごとの1分あたりの回数（0 なら制限しない）
           rateLimit = rate,
@@ -96,6 +96,7 @@ object Config {
           )
         },
         appSecret = secret,
+        notifyPolicy = notifyPolicy,
         nodeId = opt("NODE_ID").getOrElse(java.net.InetAddress.getLocalHost.getHostName + "-" +
           java.util.UUID.randomUUID().toString.take(8))
       )

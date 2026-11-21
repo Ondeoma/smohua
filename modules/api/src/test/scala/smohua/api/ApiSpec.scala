@@ -29,8 +29,21 @@ class ApiSpec extends DbSuite {
     cookieSecure = false,
     "https://smohua.example.com",
     mail = true,
-    stui = Some(LinkService("stui", "https://stui.example.com", "smohua", "secret-secret-secret"))
+    stui = Some(sbirds.links.LinkConfig(
+      "stui",
+      "https://stui.example.com",
+      "https://stui.example.com",
+      "smohua",
+      "secret-secret-secret",
+      "read write"
+    ))
   )
+
+  /** 通知先へ送ってよい宛先（テストでは名前を引かずに済むよう、ホスト名で許す）。 */
+  private val hookPolicy = sbirds.net.NetGuard.Policy.allowList(List("hooks.example.com")).toOption.get
+
+  /** 通知先（受信 Webhook・Webhook）に届いた要求（パス・ヘッダー・本文）。 */
+  private final case class Hooked(path: String, headers: Map[String, String], body: String)
 
   private final case class Env(app: HttpApp[IO],
                                users: UserStore,
@@ -39,11 +52,19 @@ class ApiSpec extends DbSuite {
                                box: SecretBox,
                                notifier: NotifyService,
                                stuiCalls: Ref[IO, List[(String, Json)]],
-                               mails: Ref[IO, List[Mail]])
+                               mails: Ref[IO, List[Mail]],
+                               targets: TargetService,
+                               targetStore: TargetStore,
+                               hooks: Ref[IO, List[Hooked]])
 
   private def env(xa: doobie.Transactor[IO]): IO[Env] =
-    (Ref.of[IO, List[(String, Json)]](Nil), Ref.of[IO, List[Mail]](Nil), EventFeed(new FormStore(xa))).mapN {
-      (calls, mails, feed) =>
+    (
+      Ref.of[IO, List[(String, Json)]](Nil),
+      Ref.of[IO, List[Mail]](Nil),
+      EventFeed(new FormStore(xa)),
+      Ref.of[IO, List[Hooked]](Nil)
+    ).mapN {
+      (calls, mails, feed, hooks) =>
         val users = new UserStore(xa); val forms = new FormStore(xa); val activity = new ActivityStore(xa);
         val tokens = new IntegrationTokenStore(xa)
         val box = SecretBox("test-secret-0123456789")
@@ -59,11 +80,22 @@ class ApiSpec extends DbSuite {
         val mailer = new Mailer {
           def send(m: Mail): IO[Unit] = mails.update(_ :+ m)
         }
+        // 偽の通知先: 届いた要求を覚えて 200 を返す
+        val hookHttp = Client.fromHttpApp(HttpApp[IO](req =>
+          req.bodyText.compile.string.flatMap(b =>
+            hooks.update(_ :+
+              Hooked(req.uri.path.renderString, req.headers.headers.map(h => h.name.toString -> h.value).toMap, b))
+          ).as(Response[IO](Status.Ok))
+        ))
         val sess = new SessionAuth(users, cfg)
-        val notifier = new NotifyService(forms, users, tokens, box, stui, Some(mailer), None, cfg)
+        val stuiClient =
+          cfg.stui.map(c => new sbirds.links.StuiClient(new sbirds.links.LinkClient(c, stui, tokens, box)))
+        val targetStore = new TargetStore(xa)
+        val targets = new TargetService(targetStore, forms, hookHttp, hookPolicy, Some(mailer), box, cfg)
+        val notifier = new NotifyService(forms, users, targets, stuiClient, Some(mailer), None, cfg)
         val svc = new FormService(forms, notifier, activity, cfg)
         val rest = new UserRoutes(users, activity, sess).routes <+> new FormRoutes(forms, svc, sess).routes <+>
-          new StreamRoutes(feed, sess).routes
+          new StreamRoutes(feed, sess).routes <+> new FormTargetRoutes(svc, targets, activity, sess).routes
         Env(
           (rest <+> new McpRoutes(rest, sess, cfg.publicUrl).routes).orNotFound,
           users,
@@ -72,7 +104,10 @@ class ApiSpec extends DbSuite {
           box,
           notifier,
           calls,
-          mails
+          mails,
+          targets,
+          targetStore,
+          hooks
         )
     }
 
@@ -106,7 +141,9 @@ class ApiSpec extends DbSuite {
   private def id(j: Json): String = j.hcursor.get[String]("id").getOrElse(fail(s"id がありません: ${j.noSpaces}"))
 
   /** 送信待ちを処理する（自分のテストの分が送られるまで何度か）。 */
-  private def drain(e: Env): IO[Unit] = e.forms.processOutbox(1000)(_ => IO.pure(OutboxResult.Skip("前のテストの残り"))).void
+  private def drain(e: Env): IO[Unit] =
+    e.forms.processOutbox(1000)(_ => IO.pure(OutboxResult.Skip("前のテストの残り"))).void *>
+      e.targetStore.processDeliveries(1000)(_ => IO.pure((OutboxResult.Skip("前のテストの残り"), None))).void
 
   withDb("フォームを作る → 公開する → 回答する → 一覧・集計・CSV で見る") { xa =>
     for {
@@ -596,5 +633,150 @@ class ApiSpec extends DbSuite {
       _ <- call(e, Method.POST, "/api/notifications/read", Some(k), Some(Json.obj("ids" -> Json.arr())))
       m <- e.forms.unread(u.id)
     } yield assertEquals((bad._1, n, m), (Status.BadRequest, 1, 0))
+  }
+
+  withDb("通知先: 受信 Webhook・署名付きの Webhook・メールアドレス・回答の控え・受付の開始と締め切り") { xa =>
+    import scala.concurrent.duration.*
+    for {
+      e <- env(xa)
+      _ <- drain(e)
+      owner <- newUser(e.users, "持ち主"); editor <- newUser(e.users, "編集者")
+      ko <- key(e, owner); ke <- key(e, editor)
+      c <- call(
+        e,
+        Method.POST,
+        "/api/forms",
+        Some(ko),
+        Some(Json.obj(
+          "title" -> "申し込み".asJson,
+          "questions" -> Json.arr(
+            Json.obj("id" -> "name".asJson, "kind" -> "short".asJson, "label" -> "お名前".asJson),
+            Json.obj("id" -> "mail".asJson, "kind" -> "email".asJson, "label" -> "連絡先".asJson)
+          )
+        ))
+      )
+      fid = id(c._2)
+      _ <- call(
+        e,
+        Method.PATCH,
+        s"/api/forms/$fid",
+        Some(ko),
+        Some(Json.obj(
+          "access" -> "anyone".asJson,
+          "editorIds" -> List(editor.id).asJson,
+          "notice" -> FormNotifyDto(inApp = false, receipt = true).asJson
+        ))
+      ).map(r => assertEquals(r._1, Status.Ok))
+      base = s"/api/forms/$fid/targets"
+      // 編集できる人は通知先を見られない（回答の送り先と鍵を扱うため）
+      _ <- call(e, Method.GET, base, Some(ke)).map(r => assertEquals(r._1, Status.Forbidden))
+      // 内部のアドレス・メールアドレスの形でないもの・きっかけのないものは断る
+      _ <- call(
+        e,
+        Method.POST,
+        base,
+        Some(ko),
+        Some(FormTargetReq("内部", TargetKind.Webhook, url = Some("http://127.0.0.1/x")).asJson)
+      ).map(r => assertEquals(r._1, Status.BadRequest))
+      _ <-
+        call(e, Method.POST, base, Some(ko), Some(FormTargetReq("宛先", TargetKind.Mail, address = Some("a b@x")).asJson))
+          .map(r => assertEquals(r._1, Status.BadRequest))
+      _ <- call(
+        e,
+        Method.POST,
+        base,
+        Some(ko),
+        Some(FormTargetReq(
+          "空",
+          TargetKind.ChatHook,
+          url = Some("https://hooks.example.com/hooks/a"),
+          events = Nil
+        ).asJson)
+      ).map(r => assertEquals(r._1, Status.BadRequest))
+      chat <- call(
+        e,
+        Method.POST,
+        base,
+        Some(ko),
+        Some(FormTargetReq(
+          "総務チャンネル",
+          TargetKind.ChatHook,
+          url = Some("https://hooks.example.com/hooks/abc"),
+          events = List(FormEvent.ResponseCreated, FormEvent.Closed)
+        ).asJson)
+      )
+      _ = assertEquals(chat._1, Status.Created)
+      wh <- call(
+        e,
+        Method.POST,
+        base,
+        Some(ko),
+        Some(FormTargetReq(
+          "基幹",
+          TargetKind.Webhook,
+          url = Some("https://hooks.example.com/wh"),
+          events = FormEvent.all
+        ).asJson)
+      )
+      secret = wh._2.hcursor.get[String]("secret").toOption.get
+      _ <- call(
+        e,
+        Method.POST,
+        base,
+        Some(ko),
+        Some(FormTargetReq("窓口", TargetKind.Mail, address = Some("desk@example.com")).asJson)
+      )
+        .map(r => assertEquals(r._1, Status.Created))
+      _ <- call(e, Method.GET, base, Some(ko)).map(r => assertEquals(r._2.asArray.map(_.size), Some(3)))
+      // 試しの通知はその場で送る
+      _ <- call(e, Method.POST, s"$base/${id(chat._2)}/test", Some(ko)).map(r => assertEquals(r._1, Status.NoContent))
+      _ <- e.hooks.get.map(hs => assert(hs.exists(_.body.contains("試し")), hs.toString))
+      _ <- e.hooks.set(Nil)
+      // 公開すると「受付を始めた」が Webhook にだけ届く（受信 Webhook は選んでいない）
+      _ <- call(e, Method.PATCH, s"/api/forms/$fid", Some(ko), Some(Json.obj("status" -> "open".asJson)))
+      // 匿名の回答。Markdown の記号は無害にし、控えは「連絡先」の答えへ（宛先は実行ごとに変える。控えは1時間に5通までなので）
+      tanaka = s"tanaka-${UUID.randomUUID().toString.take(8)}@example.com"
+      sub <- call(
+        e,
+        Method.POST,
+        s"/api/public/forms/$fid/responses",
+        None,
+        Some(Json.obj("answers" ->
+          Json.obj("name" -> "[田中](https://evil.example)".asJson, "mail" -> tanaka.asJson)))
+      )
+      _ = assertEquals(sub._1, Status.Created)
+      _ <- call(e, Method.PATCH, s"/api/forms/$fid", Some(ko), Some(Json.obj("status" -> "closed".asJson)))
+      // 送信待ちを直接回す（裏のワーカーの間隔を待たない）。受付の開始・締め切りは状態を変えた後に裏で積むので、届くまで繰り返す
+      _ <- (IO.sleep(200.millis) *> e.targets.deliverDue *> e.notifier.sendDue *> (e.hooks.get, e.mails.get).tupled)
+        .iterateUntil((h, m) => h.size >= 5 && m.size >= 2).timeout(20.seconds)
+      hooks <- e.hooks.get
+      events = hooks.filter(_.path == "/wh").map(_.headers.getOrElse("X-Smohua-Event", ""))
+      _ = assertEquals(events.toSet, Set(FormEvent.Opened, FormEvent.ResponseCreated, FormEvent.Closed))
+      // 署名は本文そのものの HMAC-SHA256
+      _ = hooks.filter(_.path == "/wh").foreach(h =>
+        assertEquals(h.headers.get("X-Smohua-Signature"), Some(sbirds.links.Webhook.signature(secret, h.body)))
+      )
+      resp = hooks.find(h => h.path == "/wh" && h.headers.get("X-Smohua-Event").contains(FormEvent.ResponseCreated)).get
+      answers = io.circe.parser.parse(resp.body).toOption.get.hcursor.downField("response").get[List[Json]]("answers")
+      _ = assert(answers.toOption.get.exists(_.hcursor.get[String]("value").contains(tanaka)))
+      chats = hooks.filter(_.path == "/hooks/abc").map(h => io.circe.parser.parse(h.body).toOption.get.hcursor)
+      _ = assertEquals(chats.size, 2) // 回答と締め切り（受付の開始は選んでいない）
+      _ = assert(
+        chats.exists(_.get[String]("text").exists(_.contains("\\[田中\\]\\(https://evil.example\\)"))),
+        chats.toString
+      )
+      _ = assert(chats.exists(_.get[String]("text").exists(_.contains("締め切りました"))))
+      _ = assertEquals(chats.head.get[String]("username"), Right("smohua"))
+      mails <- e.mails.get
+      _ = assertEquals(mails.map(_.to).toSet, Set("desk@example.com", tanaka))
+      _ = assert(mails.exists(m =>
+        m.to == tanaka && m.subject.contains("回答の控え") && m.body.contains(tanaka)
+      ))
+      // 同じアドレスへの控えは1時間に決まった数まで
+      limited = s"limit-${UUID.randomUUID()}@example.com" // 前の実行の行が残っていても数が狂わないように
+      ok <- (1 to 6).toList.traverse(_ => e.forms.enqueueMail(limited, Json.obj(), 5))
+      _ = assertEquals(ok.count(identity), 5)
+      _ <- drain(e)
+    } yield ()
   }
 }

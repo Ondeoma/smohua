@@ -12,8 +12,11 @@ smohua は、フォームを作って回答を集めるためのツールです�
 - **回答を集める**: 回答は質問の id に結び付くので、あとから質問文や選択肢を変えても、前の回答は残る
 - **回答を見る**: 質問ごとの**集計**（選択肢ごとの件数と割合・段階や数の平均・記述の一覧）と、回答の**一覧**。CSV（Excel で開ける UTF-8）のダウンロード。
   新しい回答は、開いている画面にすぐ出る（Server-Sent Events）
-- **通知**: 回答が届いたら、フォームの持ち主と編集できる人に知らせる。画面内の通知とプッシュ通知（PWA）、メール（SMTP。**skereru** など）、
-  **stui**（チャット。本人への DM か、決めたチャンネル）。フォームごとに選ぶ
+- **通知**: 回答が届いた・受付を始めた・締め切った（受付期間の始まり・終わりを含む）ときに知らせる。フォームごとに選ぶ
+  - 持ち主と編集できる人へ: 画面内の通知とプッシュ通知（PWA）、メール（SMTP。**skereru** など）、**stui**（チャット。本人への DM か、決めたチャンネル）
+  - 回答した人へ: 回答の控えをメールで送る（ログインした人はそのアドレス、匿名のフォームは「メールアドレス」の質問の答え）
+  - 通知先へ（持ち主と管理者が設定）: **受信 Webhook**（stui・Slack・Mattermost のチャンネルに投稿）、**Webhook**（署名付きの JSON。ほかのシステムとの連携）、
+    決まった**メールアドレス**（問い合わせの窓口など）。試しに送れる
 - **いっしょに使う**: フォームに「編集できる人」を足せる（質問と設定を変えられ、回答を見られる）
 - **兄弟のサービスとの連携**: ログインとアイコンは **sruru**（IdP）、観測は **skorimako**、通知は **skereru**（メール）と **stui**、
   **skiwi** のページには回答を表示するブロックを置ける（[docs/integrations.md](docs/integrations.md)）
@@ -90,6 +93,7 @@ STATIC_DIR=dist/static java -cp 'dist/lib/*' smohua.app.Main
 | `TIMEZONE` | 新しいユーザーの既定のタイムゾーン（既定 `Asia/Tokyo`。CSV の日時に使う） |
 | `SMTP_HOST`・`SMTP_PORT`・`SMTP_TLS`（`starttls`・`ssl`・`none`）・`SMTP_USER`・`SMTP_PASSWORD`・`MAIL_FROM` | メールの通知。skereru に送るなら、skereru に送信用のメールボックスを作り、submission（587番）とそのアプリパスワードを指定する |
 | `STUI_URL`・`STUI_CLIENT_ID`・`STUI_CLIENT_SECRET`・`STUI_INTERNAL_URL` | stui への通知。stui の `OAUTH_CLIENTS` に smohua を登録する（下の「兄弟のサービスとの連携」） |
+| `NOTIFY_ALLOW_INTERNAL` | フォームの通知先（受信 Webhook・Webhook）に、内部のアドレスを許す一覧（カンマ区切りの CIDR・IP・ホスト名）。既定は外のアドレスだけ。stui のホストは自動で足す |
 | `OAUTH_CLIENTS` | smohua の回答を読む兄弟のサービス（skiwi）。JSON の配列 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`・`OTEL_EXPORTER_OTLP_HEADERS` | skorimako へログ・トレース・メトリクスを送る（例: `https://skorimako.example.com`・`Authorization=Bearer <取り込み用のキー>`） |
 | `SKORIMAKO_RUM_URL`・`SKORIMAKO_RUM_TOKEN` | ブラウザの観測（表示の速さ・JavaScript のエラー） |
@@ -111,9 +115,10 @@ STATIC_DIR=dist/static java -cp 'dist/lib/*' smohua.app.Main
   （`form.create`・`form.submit`・`form.summary`・`notify.fanout`・`mail.send`・`stui.notify`・`push.send`）と、メトリクス
   （`smohua.forms.created`・`smohua.forms.status_changed`・`smohua.responses.submitted`・`smohua.notifications.sent`・`smohua.push.sent`・`smohua.logins`・`smohua.sse.connections`、
   DB から読むゲージ `smohua.users.total`・`smohua.users.active_24h`・`smohua.sessions.active`・`smohua.forms.total`・`smohua.forms.open`・`smohua.responses.total`・
-  `smohua.responses.last_24h`・`smohua.notify.outbox`）を送る。ログにはトレースの ID と操作したユーザーが付く。
+  `smohua.responses.last_24h`・`smohua.notify.outbox`・`smohua.notify.deliveries`）を送る。ログにはトレースの ID と操作したユーザーが付く。
 - **skereru（メール）**: 兄弟と同じく SMTP でメールを送る（skereru は通知用の API を持たないメールサーバーなので、送り先を skereru にする）。
-- **stui（チャット）**: 兄弟（skea・skorimako）と同じく、各ユーザーが個人設定の「stui 連携」で許可し（OAuth）、smohua が本人のトークンで `POST /api/apps/notify` を呼ぶ。
+- **stui（チャット）**: 兄弟（skea・skorimako・skereru）と同じく、各ユーザーが個人設定の「stui 連携」で許可し（OAuth）、smohua が本人のトークンで `POST /api/apps/notify` を呼ぶ。
+  連携しなくても、フォームの通知先に stui のチャンネルの受信 Webhook の URL を登録すれば、そのチャンネルに投稿できる。
 - **skiwi（ブロック）**: skiwi のエディタの `/` →「フォームの回答（smohua）」。skiwi が smohua の OAuth のクライアントになり、見ている本人の権限で回答を読む。
 
 ## 冗長構成
@@ -125,6 +130,8 @@ STATIC_DIR=dist/static java -cp 'dist/lib/*' smohua.app.Main
 | セッション・OIDC のログイン途中の state・OAuth の認可コード・連携の state | DB（どのノードに戻ってきてもよい。スティッキーセッションは要らない） |
 | 回答の「1人1回」 | 保存と同じトランザクションで、フォームと人の組のロック（`pg_advisory_xact_lock`）を取って確かめる |
 | 通知の送信（メール・stui） | 送信待ちの表 `notify_outbox` を全ノードのワーカーが `FOR UPDATE SKIP LOCKED` で取り合う（二重に送らない）。失敗は間を空けて5回まで |
+| 通知先への送信（受信 Webhook・Webhook・メールアドレス） | 送信待ちの表 `form_delivery` を同じく取り合う。失敗は間を空けて8回まで |
+| 受付の開始・締め切りの検知 | 全ノードが30秒ごとに見比べ、`form.accepting` を書き換えられた1ノードだけが知らせる |
 | 掃除（期限切れのセッション・古い通知・削除したフォーム） | `job_lock` のリースを取れた1ノードだけが動かす |
 | 画面への知らせ（SSE） | 各ノードが0.5秒ごとに DB の変更履歴（`form_event`）と通知を確かめ、自分につないでいる画面へ配る。ノードどうしの連絡（Redis・LISTEN/NOTIFY）は使わない |
 | プッシュ通知の鍵（VAPID） | DB に1組（最初に起動したノードが作り、全ノードで同じものを使う） |

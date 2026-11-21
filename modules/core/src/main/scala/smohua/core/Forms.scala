@@ -15,6 +15,13 @@ object Forms {
   private val IdRe = "^[A-Za-z0-9_-]{1,40}$".r
   private val DateRe = "^\\d{4}-\\d{2}-\\d{2}$".r
 
+  /** メールアドレスの形（ローカル部@ドメイン。空白・制御文字・山括弧・カンマは入れない。ヘッダーに差し込まれないように）。 */
+  private val EmailRe =
+    "^[^\\s@<>,;\"\\\\]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)+$".r
+
+  /** メールアドレスとして送れる形か（254文字まで）。 */
+  def isEmail(s: String): Boolean = s.length <= 254 && EmailRe.matches(s) && !s.exists(_.isControl)
+
   /** 題名（改行などの制御文字は空白にする。メールの件名・CSV の見出し・通知の1行目にそのまま入るため）。 */
   def title(s: String): Either[String, String] = {
     val t = s.map(c => if c.isControl then ' ' else c).trim
@@ -108,6 +115,11 @@ object Forms {
           case Some(j)
               if !j.asString.exists(s => DateRe.matches(s) && scala.util.Try(java.time.LocalDate.parse(s)).isSuccess) =>
             bad("日付（yyyy-MM-dd）で入力してください")
+          case other => Right(other)
+        }
+      case QuestionKind.Email =>
+        text(254).flatMap {
+          case Some(j) if !j.asString.exists(isEmail) => bad("メールアドレスの形で入力してください")
           case other => Right(other)
         }
       case _ => Right(None)
@@ -218,7 +230,15 @@ object Forms {
 
   /** 通知に載せる回答の要約（最初のいくつかの質問と回答）。 */
   def digest(qs: List[QuestionDto], answers: Map[String, Json], max: Int = 5): String =
+    digestLines(qs, answers, max).map((l, a) => s"$l: $a").mkString("\n")
+
+  /** 要約の行（質問と回答の組）。 */
+  def digestLines(qs: List[QuestionDto], answers: Map[String, Json], max: Int = 5): List[(String, String)] =
     qs.flatMap(q =>
-      Option(Answers.of(answers, q)).filter(_.nonEmpty).map(a => s"${q.label}: ${a.replaceAll("\\s+", " ").take(120)}")
-    ).take(max).mkString("\n")
+      Option(Answers.of(answers, q)).filter(_.nonEmpty).map(a => q.label -> a.replaceAll("\\s+", " ").take(120))
+    ).take(max)
+
+  /** 回答の控えの宛先: 「メールアドレス」の質問のうち、最初に答えのあるもの。 */
+  def receiptAddress(qs: List[QuestionDto], answers: Map[String, Json]): Option[String] =
+    qs.filter(_.kind == QuestionKind.Email).flatMap(q => answers.get(q.id).flatMap(_.asString)).find(isEmail)
 }

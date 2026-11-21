@@ -27,7 +27,9 @@ final case class AppConfig(port: Int,
                            staticDir: Option[String],
                            smtp: Option[SmtpConfig],
                            appSecret: String,
-                           nodeId: String)
+                           nodeId: String,
+                           /** フォームの通知先（受信 Webhook・Webhook）へ送ってよい宛先（NOTIFY_ALLOW_INTERNAL） */
+                           notifyPolicy: sbirds.net.NetGuard.Policy = sbirds.net.NetGuard.Policy.publicOnly)
 
 object Main extends IOApp.Simple {
 
@@ -61,13 +63,26 @@ object Main extends IOApp.Simple {
         sess = new SessionAuth(users, cfg.api)
         pushStore = new sbirds.push.PushStore(xa, maxPerUser = Some(PushRoutes.MaxPerUser))
         push <- Resource.eval(sbirds.push.PushService.create(pushStore, http, cfg.api.publicUrl, "smohua"))
-        notifier =
-          new NotifyService(forms, users, tokens, box, http, cfg.smtp.map(new SmtpMailer(_)), Some(push), cfg.api)
+        // 利用者が決めた URL（フォームの通知先）へは、確かめた IP にそのままつなぐクライアントで送る（リダイレクトは追わない）
+        hookHttp <- sbirds.net.NetGuard.client(cfg.notifyPolicy, timeout = 30.seconds).map(HttpClientTelemetry(_))
+        mailer = cfg.smtp.map(new SmtpMailer(_))
+        stui = cfg.api.stui.map(c => new sbirds.links.StuiClient(new sbirds.links.LinkClient(c, http, tokens, box)))
+        targetStore = new TargetStore(xa)
+        targets =
+          new TargetService(targetStore, forms, hookHttp, cfg.notifyPolicy, mailer, box, cfg.api)
+        notifier = new NotifyService(forms, users, targets, stui, mailer, Some(push), cfg.api)
         svc = new FormService(forms, notifier, activity, cfg.api)
         feed <- Resource.eval(EventFeed(forms))
         _ <- Resource.eval(startupNotes(cfg))
         // 通知の送信（全ノード。SKIP LOCKED で取り合う）、画面への知らせ（各ノードが自分につないでいる画面へ）、掃除（リースを取った1ノードだけ）
-        loops = List[IO[Unit]](notifier.outboxLoop, feed.loop, purgeLoop(users, forms, activity, lock))
+        // 受付の開始・締め切りの見比べ（全ノード。変わったことを知るのは form.accepting を書き換えた1ノードだけ）
+        loops = List[IO[Unit]](
+          notifier.outboxLoop,
+          targets.loop,
+          notifier.acceptingLoop,
+          feed.loop,
+          purgeLoop(users, forms, targetStore, activity, lock)
+        )
         _ <- loops.traverse_(_.background)
         rest =
           // ロードバランサー用のヘルスチェック。DB（プライマリ）に書けない状態なら 503
@@ -87,7 +102,8 @@ object Main extends IOApp.Simple {
               sess,
               cfg.api
             ).routes <+>
-            new StuiRoutes(tokens, http, box, activity, sess, cfg.api).routes <+>
+            new StuiRoutes(stui, activity, sess, cfg.api).routes <+>
+            new FormTargetRoutes(svc, targets, activity, sess).routes <+>
             RumRoutes.routes <+>
             new PushRoutes(pushStore, push, sess).routes
         app = rest <+> new McpRoutes(rest, sess, cfg.api.publicUrl).routes
@@ -142,7 +158,11 @@ object Main extends IOApp.Simple {
       Metrics.gauge(
         "smohua.notify.outbox",
         "送信待ちの通知（メール・stui）の数"
-      )(q(sql"select count(*) from notify_outbox where sent_at is null and not skipped"))
+      )(q(sql"select count(*) from notify_outbox where sent_at is null and not skipped")),
+      Metrics.gauge(
+        "smohua.notify.deliveries",
+        "送信待ちの、フォームの通知先（受信 Webhook・Webhook・メールアドレス）への通知の数"
+      )(q(sql"select count(*) from form_delivery where done_at is null and not failed"))
     ).sequence_
   }
 
@@ -154,11 +174,16 @@ object Main extends IOApp.Simple {
       )(sbirds.observe.Log.println("[smohua] WARNING: OIDC が未設定です。開発用のログイン（DEV_LOGIN）を使います。本番では使わないでください"))
 
   /** 期限切れのセッション・古い通知・変更履歴・送信済みの通知・監査ログ・削除したフォームを消す（1ノードだけ）。 */
-  private def purgeLoop(users: UserStore, forms: FormStore, activity: ActivityStore, lock: JobLock): IO[Unit] =
+  private def purgeLoop(users: UserStore,
+                        forms: FormStore,
+                        targetStore: TargetStore,
+                        activity: ActivityStore,
+                        lock: JobLock): IO[Unit] =
     Periodic.run(10.minutes, 1.hour, ErrorCode.PurgeFailed)(lock.exclusive("purge", 50.minutes)(
       IO.realTimeInstant.flatMap(users.purgeExpired) *> forms.purgeNotifications(180).void *>
         forms.purgeEvents(14).void *>
-        forms.purgeOutbox(30).void *> forms.purgeDeleted(30).void *> activity.purgeAudit(730).void
+        forms.purgeOutbox(30).void *> targetStore.purge(30).void *> forms.purgeDeleted(30).void *>
+        activity.purgeAudit(730).void
     ))
 
   /** ビルド済みの画面の配信。存在しないパスは index.html（SPA）。CSP は index.html の中身（インラインのスクリプトのハッシュ）から起動時に作る。 */

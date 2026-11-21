@@ -110,6 +110,7 @@ def showForm(s: State) = computed { s.done.v.isEmpty && s.form.v.isDefined }
             <textarea v-if="is(x, QuestionKind.Long)" v-model="x.text" rows="4" maxlength="10000"></textarea>
             <input v-if="is(x, QuestionKind.Number)" type="number" step="any" v-model="x.text">
             <input v-if="is(x, QuestionKind.Date)" type="date" v-model="x.text">
+            <input v-if="is(x, QuestionKind.Email)" type="email" v-model="x.text" maxlength="254" autocomplete="email" class="wide">
             <div v-if="is(x, QuestionKind.Single)" class="opts">
               <label v-for="o in x.q.options" class="check"><input type="radio" :name="x.q.id" :value="o" v-model="x.text"> {{ o }}</label>
             </div>

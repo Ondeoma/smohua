@@ -49,6 +49,15 @@ object Api extends sbirds.web.ApiBase {
   def deleteResponse(id: UUID, responseId: UUID): Future[Unit] = delete(s"/api/forms/$id/responses/$responseId")
   def summary(id: UUID): Future[FormSummaryStatsDto] = get[FormSummaryStatsDto](s"/api/forms/$id/summary")
 
+  // 通知先（持ち主と管理者だけ）
+  def targets(id: UUID): Future[List[FormTargetDto]] = get[List[FormTargetDto]](s"/api/forms/$id/targets")
+  def createTarget(id: UUID, r: FormTargetReq): Future[FormTargetDto] =
+    post[FormTargetDto](s"/api/forms/$id/targets", r.asJson.dropNullValues)
+  def updateTarget(id: UUID, tid: UUID, r: FormTargetReq): Future[FormTargetDto] =
+    put[FormTargetDto](s"/api/forms/$id/targets/$tid", r.asJson.dropNullValues)
+  def deleteTarget(id: UUID, tid: UUID): Future[Unit] = delete(s"/api/forms/$id/targets/$tid")
+  def testTarget(id: UUID, tid: UUID): Future[Unit] = postUnit(s"/api/forms/$id/targets/$tid/test")
+
   // ---------------------------------------------------------------- 回答する側
 
   def publicForm(id: UUID): Future[PublicFormDto] = get[PublicFormDto](s"/api/public/forms/$id")

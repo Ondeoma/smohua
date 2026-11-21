@@ -30,6 +30,12 @@ final class FormService(forms: FormStore, notifier: NotifyService, activity: Act
         }
     }
 
+  /** 持ち主と管理者だけ（通知先。回答の中身をフォームの外へ送る先と、その鍵を扱うため）。 */
+  def ownerAccess(s: AuthSession, id: UUID, write: Boolean = false): Res[FormRow] =
+    access(s, id, write).map(_.flatMap(f =>
+      Either.cond(f.ownerId == s.user.id || s.canAdmin, f, AppError(ErrorCode.FormTargetOwnerOnly))
+    ))
+
   /** 持ち主・管理者・編集できる人か。 */
   private def visible(s: AuthSession, f: FormRow): IO[Boolean] =
     if f.ownerId == s.user.id || s.canAdmin then IO.pure(true) else forms.isEditor(f.id, s.user.id)
@@ -151,17 +157,19 @@ final class FormService(forms: FormStore, notifier: NotifyService, activity: Act
             ).flatMap {
               case None => IO.pure(Left(NotFound))
               case Some(g) =>
-                IO.whenA(r.status.exists(_ != f.status))(Metrics.count(
-                  "smohua.forms.status_changed",
-                  "status" -> status
-                ) *>
-                  activity.audit(
-                    Some(s.user.id),
-                    s.viaString,
-                    "form.status",
-                    Some(id.toString),
-                    Json.obj("status" -> status.asJson)
-                  )) *>
+                // 受付を始めた・締め切ったなら知らせる（受付期間を変えたときも）
+                notifier.syncAccepting(Some(id)).start *>
+                  IO.whenA(r.status.exists(_ != f.status))(Metrics.count(
+                    "smohua.forms.status_changed",
+                    "status" -> status
+                  ) *>
+                    activity.audit(
+                      Some(s.user.id),
+                      s.viaString,
+                      "form.status",
+                      Some(id.toString),
+                      Json.obj("status" -> status.asJson)
+                    )) *>
                   dto(s, g).map(Right(_))
             }
         }
@@ -268,7 +276,7 @@ final class FormService(forms: FormStore, notifier: NotifyService, activity: Act
                   notifier.responseArrived(
                     f,
                     row,
-                    who.map(_.user.name)
+                    who.map(_.user)
                   ).start.as(Right(SubmittedDto(row.id, f.confirmation)))
             }
         }

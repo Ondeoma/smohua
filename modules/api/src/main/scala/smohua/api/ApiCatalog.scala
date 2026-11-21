@@ -25,11 +25,21 @@ object ApiCatalog {
     Endpoint("GET", "/api/forms/{formId}/responses.csv", "回答の CSV"),
     Endpoint("DELETE", "/api/forms/{formId}/responses/{responseId}", "回答を削除する"),
     Endpoint("GET", "/api/forms/{formId}/summary", "質問ごとの集計（選択肢の件数・平均・記述）"),
+    Endpoint("GET", "/api/forms/{formId}/targets", "フォームの通知先（受信 Webhook・Webhook・メールアドレス。持ち主・管理者）"),
+    Endpoint(
+      "POST",
+      "/api/forms/{formId}/targets",
+      "通知先を作る {name, kind: chat_hook|webhook|mail, url?, address?, events: [response.created|form.opened|form.closed], enabled}"
+    ),
+    Endpoint("PUT", "/api/forms/{formId}/targets/{targetId}", "通知先を変える（種類は変えられない）"),
+    Endpoint("DELETE", "/api/forms/{formId}/targets/{targetId}", "通知先を削除する"),
+    Endpoint("POST", "/api/forms/{formId}/targets/{targetId}/test", "通知先に試しの通知を送る"),
     Endpoint("GET", "/api/public/forms/{formId}", "回答する人に見せるフォーム"),
     Endpoint("POST", "/api/public/forms/{formId}/responses", "回答する {answers: {質問の id: 値}}（複数選ぶ質問は文字列の配列）"),
     Endpoint("GET", "/api/notifications?unread=true", "自分への通知"),
     Endpoint("POST", "/api/notifications/read", "通知を既読にする {ids?}（省略するとすべて）"),
     Endpoint("GET", "/api/integrations/links", "通知を送れる兄弟のサービス（stui）と、連携済みかどうか"),
+    Endpoint("GET", "/api/integrations/stui/channels", "stui で投稿先に選べるチャンネル（自分が参加しているもの）"),
     Endpoint("GET", "/api/admin/users", "ユーザーの一覧（管理者）"),
     Endpoint("PATCH", "/api/admin/users/{userId}", "ユーザーを変える {isAdmin?, disabled?}（管理者）"),
     Endpoint("GET", "/api/admin/audit", "監査ログ（管理者）")
