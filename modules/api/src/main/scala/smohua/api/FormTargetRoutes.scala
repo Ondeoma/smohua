@@ -1,7 +1,6 @@
 package smohua.api
 
 import cats.effect.*
-import cats.syntax.all.*
 import io.circe.Json
 import io.circe.syntax.*
 import org.http4s.*

@@ -45,7 +45,7 @@ smohua は、フォームを作って回答を集めるためのツールです�
 | `modules/web` | 画面（[Scalactive](https://github.com/Ondeoma/scalactive) の `.st` 単一ファイルコンポーネント） |
 | `frontend/` | Vite。Scala.js の出力をビルドする。Service Worker（`public/sw.js`）と PWA の manifest・アイコン |
 
-技術: Scala 3.3 LTS、Cats Effect 3、http4s 1.0（マイルストーン版）、doobie、Flyway、PostgreSQL 17、Scala.js + Scalactive。
+技術: Scala 3.9 LTS、Cats Effect 3、http4s 1.0（マイルストーン版）、doobie、Flyway、PostgreSQL 17、Scala.js + Scalactive。
 画面は Scala.js で書き、JS のままなのは Service Worker と Vite の設定だけです。
 
 ## 開発

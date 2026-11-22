@@ -3,7 +3,6 @@ package smohua.app
 import sbirds.http.Env.*
 import sbirds.db.*
 import cats.effect.*
-import cats.syntax.all.*
 import smohua.api.*
 import sbirds.auth.OidcConfig
 import sbirds.http.RateLimitConfig
