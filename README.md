@@ -50,7 +50,7 @@ smohua は、フォームを作って回答を集めるためのツールです�
 
 ## 開発
 
-必要なもの: JDK 21、sbt、Node.js、Docker。
+必要なもの: JDK 25、sbt、Node.js、Docker。
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d --wait   # PostgreSQL (:54398。テスト用の smohua_test も作る)
